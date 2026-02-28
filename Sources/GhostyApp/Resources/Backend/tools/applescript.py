@@ -1,7 +1,6 @@
 """macOS automation via AppleScript and CLI commands."""
 
 import subprocess
-import shlex
 
 
 def _run_osascript(script: str, timeout: float = 10) -> str:
@@ -61,20 +60,10 @@ def open_file(path: str):
     subprocess.run(["open", path], check=True, timeout=10)
 
 
-def spotlight_search(query: str):
-    """Open Spotlight and type a search query."""
-    import pyautogui
-    pyautogui.hotkey("command", "space")
-    import time
-    time.sleep(0.5)
-    pyautogui.write(query, interval=0.03)
-
-
 def set_volume(level: int):
     """Set system volume (0-100)."""
-    # macOS volume is 0-7 in AppleScript, scale from 0-100
-    scaled = max(0, min(7, round(level * 7 / 100)))
-    _run_osascript(f"set volume output volume {level}")
+    clamped = max(0, min(100, level))
+    _run_osascript(f"set volume output volume {clamped}")
 
 
 def toggle_dark_mode():
@@ -84,24 +73,3 @@ def toggle_dark_mode():
         "to set dark mode to not dark mode"
     )
     _run_osascript(script)
-
-
-def get_clipboard() -> str:
-    """Return current clipboard text."""
-    result = subprocess.run(
-        ["pbpaste"], capture_output=True, text=True, timeout=5,
-    )
-    return result.stdout
-
-
-def set_clipboard(text: str):
-    """Set clipboard text."""
-    process = subprocess.Popen(
-        ["pbcopy"], stdin=subprocess.PIPE, timeout=5,
-    )
-    process.communicate(input=text.encode())
-
-
-if __name__ == "__main__":
-    print(f"Frontmost app: {get_frontmost_app()}")
-    print(f"Running apps: {list_running_apps()}")

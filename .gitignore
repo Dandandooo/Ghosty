@@ -4,6 +4,12 @@
 
 Package.resolved
 
-# Python venv
+# Python venv & environment
 .venv/
 __pycache__/
+.env
+
+# Misc
+errors.txt
+*.pyc
+.DS_Store

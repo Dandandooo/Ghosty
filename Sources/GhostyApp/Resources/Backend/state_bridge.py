@@ -3,7 +3,8 @@
 import json
 import os
 
-STATE_DIR = os.path.expanduser("~/ghosty")
+from config import STATE_DIR
+
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 
 
@@ -11,12 +12,7 @@ def _ensure_dir():
     os.makedirs(STATE_DIR, exist_ok=True)
 
 
-def update_state(
-    state,
-    message=None,
-    step=None,
-    total_steps=None,
-):
+def update_state(state, message=None, step=None, total_steps=None):
     """Write a state update to ~/ghosty/state.json.
 
     Args:
@@ -62,12 +58,3 @@ def read_state() -> dict:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
-
-
-if __name__ == "__main__":
-    set_working("Testing state module...", step=1, total_steps=2)
-    print(f"State written: {read_state()}")
-    set_complete("Done testing.")
-    print(f"State written: {read_state()}")
-    set_idle()
-    print(f"State written: {read_state()}")
