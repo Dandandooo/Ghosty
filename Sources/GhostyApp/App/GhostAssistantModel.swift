@@ -27,6 +27,8 @@ final class GhostAssistantModel: ObservableObject {
     @Published var textDraft = ""
     @Published var outputItems: [AssistantOutputItem] = []
     @Published var isSubmittingText = false
+    @Published var textCursorScreenPoint: CGPoint? = nil
+    @Published var textActivityToken: Int = 0
 
     var isSleeping: Bool {
         assistantState == .hidden

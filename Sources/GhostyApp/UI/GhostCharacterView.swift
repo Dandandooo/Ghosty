@@ -5,6 +5,8 @@ import SwiftUI
 struct GhostCharacterView: View {
     let state: AssistantState
     var size: CGFloat = 30
+    var gazeTarget: CGPoint? = nil
+    var gazeActivityToken: Int = 0
     private let bodyHeightMultiplier: CGFloat = 1.28
     private let baseScale: CGFloat = 1.06
 
@@ -14,6 +16,10 @@ struct GhostCharacterView: View {
     @State private var leftPupilOffset: CGSize = .zero
     @State private var rightPupilOffset: CGSize = .zero
     @State private var ghostFrameInScreen: CGRect = .zero
+    @State private var lastMousePos: CGPoint = .zero
+    @State private var followingTextCursor = false
+    @State private var lastActivityTime: Date = Date()
+    @State private var isIdle = false
     private let flapCyclesPerSecond: CGFloat = 0.22
 
     private let gazeTimer = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -180,8 +186,20 @@ struct GhostCharacterView: View {
                 flapPhase = flapPhase.truncatingRemainder(dividingBy: 1)
             }
         }
-        .onChange(of: pulses) { nowPulsing in
+        .onChange(of: pulses) { _, nowPulsing in
             pulse = nowPulsing
+        }
+        .onChange(of: gazeTarget) { _, _ in
+            // keep followingTextCursor pointing at the latest position
+            if gazeTarget != nil {
+                followingTextCursor = true
+            }
+        }
+        .onChange(of: gazeActivityToken) { _, _ in
+            // fires on every keystroke, even when the screen point doesn't change
+            followingTextCursor = true
+            lastActivityTime = Date()
+            isIdle = false
         }
         .onAppear {
             flapPhase = 0
@@ -206,11 +224,38 @@ struct GhostCharacterView: View {
         }
 
         let mouse = NSEvent.mouseLocation
+        let mouseMoved = lastMousePos != .zero && hypot(mouse.x - lastMousePos.x, mouse.y - lastMousePos.y) > 1.5
+        if mouseMoved {
+            followingTextCursor = false
+            lastActivityTime = Date()
+            if isIdle { isIdle = false }
+        }
+        lastMousePos = mouse
+
+        let secondsSinceActivity = Date().timeIntervalSince(lastActivityTime)
+        if secondsSinceActivity >= 3.0 {
+            if !isIdle {
+                isIdle = true
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    leftPupilOffset = .zero
+                    rightPupilOffset = .zero
+                }
+            }
+            return
+        }
+
+        let target: CGPoint
+        if followingTextCursor, let gt = gazeTarget {
+            target = gt
+        } else {
+            target = mouse
+        }
+
         let leftEyeCenter = eyeCenterInScreen(isLeftEye: true)
         let rightEyeCenter = eyeCenterInScreen(isLeftEye: false)
 
-        leftPupilOffset = pupilOffset(toward: mouse, from: leftEyeCenter)
-        rightPupilOffset = pupilOffset(toward: mouse, from: rightEyeCenter)
+        leftPupilOffset = pupilOffset(toward: target, from: leftEyeCenter)
+        rightPupilOffset = pupilOffset(toward: target, from: rightEyeCenter)
     }
 
     private func eyeCenterInScreen(isLeftEye: Bool) -> CGPoint {
