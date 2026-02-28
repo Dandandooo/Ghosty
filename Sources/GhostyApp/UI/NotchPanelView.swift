@@ -16,7 +16,7 @@ struct NotchPanelView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken)
+            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken, isRetreating: model.isRetreating, isVoiceMode: model.isVoiceEnabled, micLevel: model.micLevel)
                 .offset(y: 6)
 
             if !model.isVoiceEnabled {
@@ -158,13 +158,15 @@ struct NotchPanelView: View {
                 .shadow(color: .pink.opacity(0.24), radius: 9, x: -5, y: 0)
                 .shadow(color: .cyan.opacity(0.2), radius: 9, x: 5, y: 0)
                 .frame(width: 236)
+                .opacity(model.isRetreating ? 0 : 1)
+                .animation(.easeOut(duration: 0.08), value: model.isRetreating)
             }
         }
         .padding(.top, 6)
-        .frame(width: model.isVoiceEnabled ? 180 : 260, height: model.isVoiceEnabled ? 90 : 450, alignment: .top)
+        .frame(width: model.isVoiceEnabled ? 180 : 260, height: model.isVoiceEnabled ? 116 : 450, alignment: .top)
         .shadow(color: .black.opacity(0.25), radius: 8, y: 5)
         .padding(shadowInset)
-        .frame(width: model.isVoiceEnabled ? 204 : 284, height: model.isVoiceEnabled ? 114 : 474, alignment: .top)
+        .frame(width: model.isVoiceEnabled ? 204 : 284, height: model.isVoiceEnabled ? 140 : 474, alignment: .top)
         .onAppear {
             requestPromptFocus()
         }

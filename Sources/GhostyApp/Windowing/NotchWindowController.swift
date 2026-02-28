@@ -9,7 +9,7 @@ private final class KeyablePanel: NSPanel {
 @MainActor
 final class NotchWindowController {
     private let panel: NSPanel
-    private let compactPanelSize = NSSize(width: 204, height: 114)
+    private let compactPanelSize = NSSize(width: 204, height: 140)
     private let expandedPanelSize = NSSize(width: 284, height: 474)
     private let peekOffset: CGFloat = 44
     private var panelSize: NSSize

@@ -27,8 +27,10 @@ final class GhostAssistantModel: ObservableObject {
     @Published var textDraft = ""
     @Published var outputItems: [AssistantOutputItem] = []
     @Published var isSubmittingText = false
+    @Published var isRetreating = false
     @Published var textCursorScreenPoint: CGPoint? = nil
     @Published var textActivityToken: Int = 0
+    @Published var micLevel: Float = 0
 
     var isSleeping: Bool {
         assistantState == .hidden
@@ -134,11 +136,29 @@ final class GhostAssistantModel: ObservableObject {
         outputItems.append(contentsOf: parsedItems)
     }
 
+    func showMessage(_ text: String) {
+        retreatTask?.cancel()
+        isPeeked = true
+        assistantState = .complete
+        outputItems.append(AssistantOutputItem(content: .text(text)))
+        scheduleRetreat()
+    }
+
     func retreatGhost() {
         retreatTask?.cancel()
         isSubmittingText = false
-        assistantState = .hidden
-        isPeeked = false
+
+        guard !isRetreating else { return }
+        isRetreating = true
+
+        Task { @MainActor [weak self] in
+            // Wait for the ghost fly-up animation to finish (~0.55 s)
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard let self else { return }
+            self.isRetreating = false
+            self.assistantState = .hidden
+            self.isPeeked = false
+        }
     }
 
     func startStateMonitor() {
