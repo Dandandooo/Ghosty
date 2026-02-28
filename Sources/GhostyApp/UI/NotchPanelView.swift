@@ -19,6 +19,24 @@ struct NotchPanelView: View {
             GhostCharacterView(state: model.assistantState, size: 88)
                 .offset(y: 6)
 
+            if model.assistantState == .working, let message = model.workingMessage {
+                VStack(spacing: 2) {
+                    Text(message)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+
+                    if let step = model.workingStep, let total = model.workingTotalSteps {
+                        Text("Step \(step) of \(total)")
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .transition(.opacity)
+            }
+
             if !model.isVoiceEnabled {
                 HStack(spacing: 8) {
                     PromptTextField(

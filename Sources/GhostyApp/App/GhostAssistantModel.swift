@@ -27,6 +27,9 @@ final class GhostAssistantModel: ObservableObject {
     @Published var textDraft = ""
     @Published var outputItems: [AssistantOutputItem] = []
     @Published var isSubmittingText = false
+    @Published var workingMessage: String?
+    @Published var workingStep: Int?
+    @Published var workingTotalSteps: Int?
 
     var isSleeping: Bool {
         assistantState == .hidden
@@ -72,30 +75,24 @@ final class GhostAssistantModel: ObservableObject {
         isPeeked = true
         isSubmittingText = true
         assistantState = .working
+        workingMessage = "Understanding: \(trimmed)"
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let startedAt = Date()
             do {
-                let response = try self.backendBridge.runPythonTemplate(input: trimmed)
-                let elapsed = Date().timeIntervalSince(startedAt)
-                if elapsed < 2.0 {
-                    try? await Task.sleep(nanoseconds: UInt64((2.0 - elapsed) * 1_000_000_000))
-                }
+                let response = try await self.backendBridge.runAgent(intent: trimmed)
                 self.appendOutput(from: response)
-                self.assistantState = .idle
             } catch {
-                let elapsed = Date().timeIntervalSince(startedAt)
-                if elapsed < 2.0 {
-                    try? await Task.sleep(nanoseconds: UInt64((2.0 - elapsed) * 1_000_000_000))
-                }
                 self.outputItems.append(
-                    AssistantOutputItem(content: .text("Template response: backend unavailable for \"\(trimmed)\"."))
+                    AssistantOutputItem(content: .text("Agent error: \(error.localizedDescription)"))
                 )
-                self.assistantState = .idle
-                print("Python backend invocation failed: \(error)")
+                print("Agent invocation failed: \(error)")
             }
 
+            self.workingMessage = nil
+            self.workingStep = nil
+            self.workingTotalSteps = nil
+            self.assistantState = .idle
             self.isSubmittingText = false
         }
     }
@@ -150,13 +147,26 @@ final class GhostAssistantModel: ObservableObject {
     }
 
     private func applyBackendState(_ update: BackendStateUpdate) {
-        if let state = update.state {
-            assistantState = state
-            isPeeked = state != .hidden
+        if let newState = update.state {
+            assistantState = newState
+            isPeeked = newState != .hidden
         }
 
-        if update.completed == true {
+        if let message = update.message {
+            workingMessage = message
+        }
+        if let step = update.step {
+            workingStep = step
+        }
+        if let totalSteps = update.total_steps {
+            workingTotalSteps = totalSteps
+        }
+
+        if update.completed == true || update.state == .complete {
             assistantState = .complete
+            workingMessage = nil
+            workingStep = nil
+            workingTotalSteps = nil
             scheduleRetreat()
         }
     }

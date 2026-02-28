@@ -5,6 +5,9 @@ struct BackendStateUpdate: Decodable {
     let state: AssistantState?
     let completed: Bool?
     let intent: String?
+    let message: String?
+    let step: Int?
+    let total_steps: Int?
 }
 
 final class BackendBridge: @unchecked Sendable {
@@ -12,10 +15,28 @@ final class BackendBridge: @unchecked Sendable {
 
     private var stateFileMonitor: StateFileMonitor?
 
+    /// Path to the Backend source directory containing the .venv and scripts.
+    private static let backendSourceDir: String = {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return home + "/Documents/school/Ghosty/Sources/GhostyApp/Resources/Backend"
+    }()
+
+    /// Path to the venv python3 binary.
+    private static let venvPython: String = backendSourceDir + "/.venv/bin/python3"
+
     func runGemini(prompt: String) async throws -> String {
         try await ShellCommandRunner.run(
             executable: "/usr/bin/env",
             arguments: ["gemini", "-p", prompt]
+        )
+    }
+
+    func runAgent(intent: String) async throws -> String {
+        let scriptPath = Self.backendSourceDir + "/agent.py"
+        return try await ShellCommandRunner.run(
+            executable: Self.venvPython,
+            arguments: [scriptPath, intent],
+            currentDirectory: Self.backendSourceDir
         )
     }
 
@@ -28,8 +49,8 @@ final class BackendBridge: @unchecked Sendable {
 
     private func runBundledPythonScript(scriptURL: URL, input: String) throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", scriptURL.path, input]
+        process.executableURL = URL(fileURLWithPath: Self.venvPython)
+        process.arguments = [scriptURL.path, input]
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -82,6 +103,39 @@ final class BackendBridge: @unchecked Sendable {
         stateFileMonitor?.start()
     }
 
+    private func agentScriptURL() throws -> URL {
+        let directCandidates: [URL?] = [
+            Bundle.module.url(forResource: "agent", withExtension: "py"),
+            Bundle.module.url(forResource: "agent", withExtension: "py", subdirectory: "Backend"),
+            Bundle.module.url(forResource: "agent", withExtension: "py", subdirectory: "Resources/Backend")
+        ]
+
+        if let match = directCandidates.compactMap({ $0 }).first {
+            return match
+        }
+
+        if let resourceRoot = Bundle.module.resourceURL,
+           let enumerator = FileManager.default.enumerator(
+            at: resourceRoot,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+           ) {
+            for case let url as URL in enumerator {
+                if url.lastPathComponent == "agent.py" {
+                    return url
+                }
+            }
+        }
+
+        throw NSError(
+            domain: "Ghosty.BackendBridge",
+            code: 4,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Agent script (agent.py) not found in \(Bundle.module.bundleURL.path)."
+            ]
+        )
+    }
+
     private func pythonTemplateScriptURL() throws -> URL {
         let directCandidates: [URL?] = [
             Bundle.module.url(forResource: "template_backend", withExtension: "py"),
@@ -117,11 +171,15 @@ final class BackendBridge: @unchecked Sendable {
 }
 
 private enum ShellCommandRunner {
-    static func run(executable: String, arguments: [String]) async throws -> String {
+    static func run(executable: String, arguments: [String], currentDirectory: String? = nil) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
+
+            if let dir = currentDirectory {
+                process.currentDirectoryURL = URL(fileURLWithPath: dir)
+            }
 
             let outputPipe = Pipe()
             let errorPipe = Pipe()
