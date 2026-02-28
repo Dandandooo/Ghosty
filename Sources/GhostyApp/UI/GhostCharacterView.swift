@@ -26,11 +26,17 @@ struct GhostCharacterView: View {
     @State private var isIdle = false
     @State private var retreatOffset: CGFloat = 0
     @State private var retreatOpacity: Double = 1.0
+    @State private var lastFrameDate: Date? = nil
     private let flapCyclesPerSecond: CGFloat = 0.22
 
-    private let gazeTimer = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
-
     var body: some View {
+        TimelineView(.animation) { timeline in
+            innerBody(frameDate: timeline.date)
+        }
+    }
+
+    @ViewBuilder
+    private func innerBody(frameDate: Date) -> some View {
         let ghostShape = GhostBody(phase: flapPhase)
         let eye = eyeMetrics
         let snappedLeftPupilOffset = pixelSnapped(leftPupilOffset)
@@ -227,17 +233,24 @@ struct GhostCharacterView: View {
                 retreatOpacity = 1.0
             }
         }
-        .onReceive(gazeTimer) { _ in
+        .onChange(of: frameDate) { _, newDate in
+            let dt: CGFloat
+            if let last = lastFrameDate {
+                dt = CGFloat(newDate.timeIntervalSince(last))
+            } else {
+                dt = 1.0 / 60.0
+            }
+            lastFrameDate = newDate
             updateGazeFromCursor()
-            flapPhase += flapCyclesPerSecond / 30.0
+            flapPhase += flapCyclesPerSecond * dt
             if isVoiceMode {
-                wavePhase += 0.018
+                wavePhase += 0.54 * dt
                 if wavePhase > 10_000 {
                     wavePhase = wavePhase.truncatingRemainder(dividingBy: 1)
                 }
             }
             if isWorking {
-                loadingPhase += 0.028
+                loadingPhase += 0.84 * dt
                 if loadingPhase > 10_000 {
                     loadingPhase = loadingPhase.truncatingRemainder(dividingBy: 1)
                 }
@@ -248,6 +261,14 @@ struct GhostCharacterView: View {
         }
         .onChange(of: pulses) { _, nowPulsing in
             pulse = nowPulsing
+        }
+        .onChange(of: state) { _, newState in
+            if newState == .working {
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    leftPupilOffset = .zero
+                    rightPupilOffset = .zero
+                }
+            }
         }
         .onChange(of: gazeTarget) { _, _ in
             // keep followingTextCursor pointing at the latest position
@@ -279,6 +300,7 @@ struct GhostCharacterView: View {
 
     private func updateGazeFromCursor() {
         guard !isRetreating else { return }
+        guard !isWorking else { return }
         guard !ghostFrameInScreen.isEmpty else {
             leftPupilOffset = .zero
             rightPupilOffset = .zero

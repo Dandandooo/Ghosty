@@ -28,10 +28,10 @@ final class BackendBridge: @unchecked Sendable {
 
     private func runBundledPythonScript(scriptURL: URL, input: String) throws -> String {
         let process = Process()
-        
+
         // Try to use the virtual environment relative to the script if it exists
         let venvURL = scriptURL.deletingLastPathComponent().appendingPathComponent(".venv/bin/python3")
-        
+
         if FileManager.default.fileExists(atPath: venvURL.path) {
             process.executableURL = venvURL
             process.arguments = [scriptURL.path, input]
@@ -93,9 +93,9 @@ final class BackendBridge: @unchecked Sendable {
 
     private func pythonTemplateScriptURL() throws -> URL {
         let directCandidates: [URL?] = [
-            Bundle.module.url(forResource: "template_backend", withExtension: "py"),
-            Bundle.module.url(forResource: "template_backend", withExtension: "py", subdirectory: "Backend"),
-            Bundle.module.url(forResource: "template_backend", withExtension: "py", subdirectory: "Resources/Backend")
+            Bundle.module.url(forResource: "no_backend", withExtension: "py"),
+            Bundle.module.url(forResource: "no_backend", withExtension: "py", subdirectory: "Backend"),
+            Bundle.module.url(forResource: "no_backend", withExtension: "py", subdirectory: "Resources/Backend")
         ]
 
         if let match = directCandidates.compactMap({ $0 }).first {
@@ -109,7 +109,7 @@ final class BackendBridge: @unchecked Sendable {
             options: [.skipsHiddenFiles]
            ) {
             for case let url as URL in enumerator {
-                if url.lastPathComponent == "template_backend.py" {
+                if url.lastPathComponent == "no_backend.py" {
                     return url
                 }
             }

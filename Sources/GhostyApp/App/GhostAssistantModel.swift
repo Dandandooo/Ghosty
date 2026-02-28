@@ -13,6 +13,7 @@ struct AssistantOutputItem: Identifiable {
     enum Content {
         case text(String)
         case image(resourceName: String)
+        case userMessage(String)
     }
 
     let id = UUID()
@@ -77,22 +78,15 @@ final class GhostAssistantModel: ObservableObject {
         isSubmittingText = true
         assistantState = .working
 
+        outputItems.append(AssistantOutputItem(content: .userMessage(trimmed)))
+
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let startedAt = Date()
             do {
                 let response = try self.backendBridge.runPythonTemplate(input: trimmed)
-                let elapsed = Date().timeIntervalSince(startedAt)
-                if elapsed < 2.0 {
-                    try? await Task.sleep(nanoseconds: UInt64((2.0 - elapsed) * 1_000_000_000))
-                }
                 self.appendOutput(from: response)
                 self.assistantState = .idle
             } catch {
-                let elapsed = Date().timeIntervalSince(startedAt)
-                if elapsed < 2.0 {
-                    try? await Task.sleep(nanoseconds: UInt64((2.0 - elapsed) * 1_000_000_000))
-                }
                 self.outputItems.append(
                     AssistantOutputItem(content: .text("Template response: backend unavailable for \"\(trimmed)\"."))
                 )
