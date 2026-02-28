@@ -28,8 +28,17 @@ final class BackendBridge: @unchecked Sendable {
 
     private func runBundledPythonScript(scriptURL: URL, input: String) throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", scriptURL.path, input]
+        
+        // Try to use the virtual environment relative to the script if it exists
+        let venvURL = scriptURL.deletingLastPathComponent().appendingPathComponent(".venv/bin/python3")
+        
+        if FileManager.default.fileExists(atPath: venvURL.path) {
+            process.executableURL = venvURL
+            process.arguments = [scriptURL.path, input]
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["python3", scriptURL.path, input]
+        }
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
