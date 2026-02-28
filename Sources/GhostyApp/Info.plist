@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Ghosty</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.dani.Ghosty</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Ghosty uses the microphone to listen for the "hey ghosty" wake word and to understand voice commands.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Ghosty uses speech recognition to detect the "hey ghosty" wake word and to transcribe voice commands.</string>
+</dict>
+</plist>
