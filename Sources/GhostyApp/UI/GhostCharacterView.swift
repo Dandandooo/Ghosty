@@ -5,15 +5,27 @@ import SwiftUI
 struct GhostCharacterView: View {
     let state: AssistantState
     var size: CGFloat = 30
+    var gazeTarget: CGPoint? = nil
+    var gazeActivityToken: Int = 0
+    var isRetreating: Bool = false
+    var isVoiceMode: Bool = false
+    var micLevel: Float = 0
     private let bodyHeightMultiplier: CGFloat = 1.28
     private let baseScale: CGFloat = 1.06
 
     @State private var pulse = false
     @State private var flapPhase: CGFloat = 0
     @State private var loadingPhase: CGFloat = 0
+    @State private var wavePhase: CGFloat = 0
     @State private var leftPupilOffset: CGSize = .zero
     @State private var rightPupilOffset: CGSize = .zero
     @State private var ghostFrameInScreen: CGRect = .zero
+    @State private var lastMousePos: CGPoint = .zero
+    @State private var followingTextCursor = false
+    @State private var lastActivityTime: Date = Date()
+    @State private var isIdle = false
+    @State private var retreatOffset: CGFloat = 0
+    @State private var retreatOpacity: Double = 1.0
     private let flapCyclesPerSecond: CGFloat = 0.22
 
     private let gazeTimer = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -91,27 +103,40 @@ struct GhostCharacterView: View {
                             Ellipse().stroke(.black.opacity(0.22), lineWidth: eye.strokeWidth)
                         }
 
-                    Circle()
-                        .fill(.black)
-                        .frame(width: eye.pupilDiameter, height: eye.pupilDiameter)
-                        .offset(snappedLeftPupilOffset)
-
-                    if isWorking {
-                        EyeLoadingDots(
-                            pupilOffset: snappedLeftPupilOffset,
-                            pupilDiameter: eye.pupilDiameter,
-                            dotDiameter: eye.highlightDiameter,
-                            phase: loadingPhase,
-                            phaseOffset: 0
+                    if isVoiceMode {
+                        Ellipse()
+                            .fill(.black)
+                            .frame(width: eye.whiteWidth, height: eye.whiteHeight)
+                        EyeWaveformView(
+                            phase: wavePhase,
+                            eyeWidth: eye.whiteWidth,
+                            eyeHeight: eye.whiteHeight,
+                            phaseShift: 0.0,
+                            micLevel: micLevel
                         )
                     } else {
                         Circle()
-                            .fill(.white.opacity(0.95))
-                            .frame(width: eye.highlightDiameter, height: eye.highlightDiameter)
-                            .offset(
-                                x: snappedLeftPupilOffset.width - eye.highlightInset,
-                                y: snappedLeftPupilOffset.height - eye.highlightInset
+                            .fill(.black)
+                            .frame(width: eye.pupilDiameter, height: eye.pupilDiameter)
+                            .offset(snappedLeftPupilOffset)
+
+                        if isWorking {
+                            EyeLoadingDots(
+                                pupilOffset: snappedLeftPupilOffset,
+                                pupilDiameter: eye.pupilDiameter,
+                                dotDiameter: eye.highlightDiameter,
+                                phase: loadingPhase,
+                                phaseOffset: 0
                             )
+                        } else {
+                            Circle()
+                                .fill(.white.opacity(0.95))
+                                .frame(width: eye.highlightDiameter, height: eye.highlightDiameter)
+                                .offset(
+                                    x: snappedLeftPupilOffset.width - eye.highlightInset,
+                                    y: snappedLeftPupilOffset.height - eye.highlightInset
+                                )
+                        }
                     }
                 }
 
@@ -123,36 +148,51 @@ struct GhostCharacterView: View {
                             Ellipse().stroke(.black.opacity(0.22), lineWidth: eye.strokeWidth)
                         }
 
-                    Circle()
-                        .fill(.black)
-                        .frame(width: eye.pupilDiameter, height: eye.pupilDiameter)
-                        .offset(snappedRightPupilOffset)
-
-                    if isWorking {
-                        EyeLoadingDots(
-                            pupilOffset: snappedRightPupilOffset,
-                            pupilDiameter: eye.pupilDiameter,
-                            dotDiameter: eye.highlightDiameter,
-                            phase: loadingPhase,
-                            phaseOffset: 0.5
+                    if isVoiceMode {
+                        Ellipse()
+                            .fill(.black)
+                            .frame(width: eye.whiteWidth, height: eye.whiteHeight)
+                        EyeWaveformView(
+                            phase: wavePhase,
+                            eyeWidth: eye.whiteWidth,
+                            eyeHeight: eye.whiteHeight,
+                            phaseShift: 0.37,
+                            micLevel: micLevel
                         )
                     } else {
                         Circle()
-                            .fill(.white.opacity(0.95))
-                            .frame(width: eye.highlightDiameter, height: eye.highlightDiameter)
-                            .offset(
-                                x: snappedRightPupilOffset.width - eye.highlightInset,
-                                y: snappedRightPupilOffset.height - eye.highlightInset
+                            .fill(.black)
+                            .frame(width: eye.pupilDiameter, height: eye.pupilDiameter)
+                            .offset(snappedRightPupilOffset)
+
+                        if isWorking {
+                            EyeLoadingDots(
+                                pupilOffset: snappedRightPupilOffset,
+                                pupilDiameter: eye.pupilDiameter,
+                                dotDiameter: eye.highlightDiameter,
+                                phase: loadingPhase,
+                                phaseOffset: 0.5
                             )
+                        } else {
+                            Circle()
+                                .fill(.white.opacity(0.95))
+                                .frame(width: eye.highlightDiameter, height: eye.highlightDiameter)
+                                .offset(
+                                    x: snappedRightPupilOffset.width - eye.highlightInset,
+                                    y: snappedRightPupilOffset.height - eye.highlightInset
+                                )
+                        }
                     }
                 }
             }
             .offset(y: eye.verticalOffset)
 
-            RoundedRectangle(cornerRadius: size * 0.08)
-                .fill(.black.opacity(0.82))
-                .frame(width: size * 0.14, height: size * 0.06)
-                .offset(x: size * 0.055, y: size * 0.08)
+            if !isVoiceMode {
+                RoundedRectangle(cornerRadius: size * 0.08)
+                    .fill(.black.opacity(0.82))
+                    .frame(width: size * 0.14, height: size * 0.06)
+                    .offset(x: size * 0.055, y: size * 0.08)
+            }
         }
         .frame(width: size, height: size * bodyHeightMultiplier)
         .contentShape(Rectangle())
@@ -167,9 +207,35 @@ struct GhostCharacterView: View {
         .animation(pulses ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: pulse)
         .animation(.easeOut(duration: 0.09), value: leftPupilOffset)
         .animation(.easeOut(duration: 0.09), value: rightPupilOffset)
+        .offset(y: retreatOffset)
+        .opacity(retreatOpacity)
+        .onChange(of: isRetreating) { _, retreating in
+            if retreating {
+                // Snap pupils to look upward
+                withAnimation(.easeOut(duration: 0.12)) {
+                    leftPupilOffset = CGSize(width: 0, height: -(size * 0.032))
+                    rightPupilOffset = CGSize(width: 0, height: -(size * 0.032))
+                }
+                // Fly upward and fade out after a brief beat
+                withAnimation(.easeIn(duration: 0.42).delay(0.08)) {
+                    retreatOffset = -(size * 4.5)
+                    retreatOpacity = 0.0
+                }
+            } else {
+                // Reset instantly (view is hidden by now)
+                retreatOffset = 0
+                retreatOpacity = 1.0
+            }
+        }
         .onReceive(gazeTimer) { _ in
             updateGazeFromCursor()
             flapPhase += flapCyclesPerSecond / 30.0
+            if isVoiceMode {
+                wavePhase += 0.018
+                if wavePhase > 10_000 {
+                    wavePhase = wavePhase.truncatingRemainder(dividingBy: 1)
+                }
+            }
             if isWorking {
                 loadingPhase += 0.028
                 if loadingPhase > 10_000 {
@@ -180,18 +246,31 @@ struct GhostCharacterView: View {
                 flapPhase = flapPhase.truncatingRemainder(dividingBy: 1)
             }
         }
-        .onChange(of: pulses) { nowPulsing in
+        .onChange(of: pulses) { _, nowPulsing in
             pulse = nowPulsing
+        }
+        .onChange(of: gazeTarget) { _, _ in
+            // keep followingTextCursor pointing at the latest position
+            if gazeTarget != nil {
+                followingTextCursor = true
+            }
+        }
+        .onChange(of: gazeActivityToken) { _, _ in
+            // fires on every keystroke, even when the screen point doesn't change
+            followingTextCursor = true
+            lastActivityTime = Date()
+            isIdle = false
         }
         .onAppear {
             flapPhase = 0
             loadingPhase = 0
+            wavePhase = 0
             pulse = pulses
         }
     }
 
     private var pulses: Bool {
-        state == .listening
+        state == .listening && !isVoiceMode
     }
 
     private var isWorking: Bool {
@@ -199,6 +278,7 @@ struct GhostCharacterView: View {
     }
 
     private func updateGazeFromCursor() {
+        guard !isRetreating else { return }
         guard !ghostFrameInScreen.isEmpty else {
             leftPupilOffset = .zero
             rightPupilOffset = .zero
@@ -206,11 +286,38 @@ struct GhostCharacterView: View {
         }
 
         let mouse = NSEvent.mouseLocation
+        let mouseMoved = lastMousePos != .zero && hypot(mouse.x - lastMousePos.x, mouse.y - lastMousePos.y) > 1.5
+        if mouseMoved {
+            followingTextCursor = false
+            lastActivityTime = Date()
+            if isIdle { isIdle = false }
+        }
+        lastMousePos = mouse
+
+        let secondsSinceActivity = Date().timeIntervalSince(lastActivityTime)
+        if secondsSinceActivity >= 3.0 {
+            if !isIdle {
+                isIdle = true
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    leftPupilOffset = .zero
+                    rightPupilOffset = .zero
+                }
+            }
+            return
+        }
+
+        let target: CGPoint
+        if followingTextCursor, let gt = gazeTarget {
+            target = gt
+        } else {
+            target = mouse
+        }
+
         let leftEyeCenter = eyeCenterInScreen(isLeftEye: true)
         let rightEyeCenter = eyeCenterInScreen(isLeftEye: false)
 
-        leftPupilOffset = pupilOffset(toward: mouse, from: leftEyeCenter)
-        rightPupilOffset = pupilOffset(toward: mouse, from: rightEyeCenter)
+        leftPupilOffset = pupilOffset(toward: target, from: leftEyeCenter)
+        rightPupilOffset = pupilOffset(toward: target, from: rightEyeCenter)
     }
 
     private func eyeCenterInScreen(isLeftEye: Bool) -> CGPoint {
@@ -319,6 +426,50 @@ private struct EyeMetrics {
     let pupilDiameter: CGFloat
     let highlightDiameter: CGFloat
     let highlightInset: CGFloat
+}
+
+private struct EyeWaveformView: View {
+    let phase: CGFloat
+    let eyeWidth: CGFloat
+    let eyeHeight: CGFloat
+    /// Offset (0–1) so the two eyes animate out of sync.
+    let phaseShift: CGFloat
+    /// Smoothed RMS mic level 0–1; scales bar amplitude.
+    let micLevel: Float
+
+    private let barCount = 4
+    // Irrational frequency ratios → non-repeating envelope per bar
+    private let barFreqs:   [CGFloat] = [1.0, 2.17, 1.63, 2.84]
+    private let barOffsets: [CGFloat] = [0.0,  0.43, 0.21, 0.68]
+    private let barHarm2:   [CGFloat] = [0.38, 0.26, 0.48, 0.22]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: eyeWidth * 0.07) {
+            ForEach(0..<barCount, id: \.self) { i in
+                Capsule()
+                    .fill(.white.opacity(0.90))
+                    .frame(width: eyeWidth * 0.10, height: barHeight(for: i))
+            }
+        }
+        .frame(width: eyeWidth, height: eyeHeight)
+        .clipShape(Ellipse())
+    }
+
+    private func barHeight(for index: Int) -> CGFloat {
+        let f  = barFreqs[index]
+        let φ  = (barOffsets[index] + phaseShift) * .pi * 2
+        let h2 = Double(barHarm2[index])
+        let θ  = Double(phase * f * .pi * 2)
+
+        let wave = sin(θ + Double(φ)) + h2 * sin(θ * 2.13 + Double(φ) * 0.7)
+        let normalized = CGFloat(wave / (1.0 + h2)) // ≈ –1…1
+
+        // At micLevel=0 bars stay at minimum; at full level the full range is used.
+        let amplitude = CGFloat(max(micLevel, 0.08)) // 0.08 floor keeps bars subtly alive at silence
+        let minH = eyeHeight * 0.18
+        let maxH = eyeHeight * (0.18 + 0.64 * amplitude)
+        return minH + (maxH - minH) * (normalized * 0.5 + 0.5)
+    }
 }
 
 private struct FabricTextureView: View {

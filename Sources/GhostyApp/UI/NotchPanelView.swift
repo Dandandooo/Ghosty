@@ -16,7 +16,7 @@ struct NotchPanelView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            GhostCharacterView(state: model.assistantState, size: 88)
+            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken, isRetreating: model.isRetreating, isVoiceMode: model.isVoiceEnabled, micLevel: model.micLevel)
                 .offset(y: 6)
 
             if model.assistantState == .working, let message = model.workingMessage {
@@ -38,6 +38,44 @@ struct NotchPanelView: View {
             }
 
             if !model.isVoiceEnabled {
+                if !model.outputItems.isEmpty {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(model.outputItems) { item in
+                                outputBubble(for: item)
+                            }
+                        }
+                        .frame(width: 236, alignment: .leading)
+                        .padding(.vertical, outputFadeHeight)
+                    }
+                    .scrollClipDisabled()
+                    .frame(maxWidth: 236, maxHeight: 300)
+                    .onScrollGeometryChange(for: CGFloat.self) { geo in
+                        geo.contentOffset.y
+                    } action: { _, newY in
+                        scrollOffset = newY
+                    }
+                    .mask {
+                        VStack(spacing: 0) {
+                            LinearGradient(
+                                colors: [.clear, .black],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: showTopFade ? outputFadeHeight : 0)
+                            Rectangle()
+                                .fill(.black)
+                            LinearGradient(
+                                colors: [.black, .clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: outputFadeHeight)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.18), value: showTopFade)
+                }
+
                 HStack(spacing: 8) {
                     PromptTextField(
                         text: $model.textDraft,
@@ -54,6 +92,10 @@ struct NotchPanelView: View {
                         },
                         onCancel: {
                             model.retreatGhost()
+                        },
+                        onCursorMoved: { point in
+                            model.textCursorScreenPoint = point
+                            model.textActivityToken &+= 1
                         },
                         onSubmit: submitTypedPrompt
                     )
@@ -134,62 +176,26 @@ struct NotchPanelView: View {
                 .shadow(color: .pink.opacity(0.24), radius: 9, x: -5, y: 0)
                 .shadow(color: .cyan.opacity(0.2), radius: 9, x: 5, y: 0)
                 .frame(width: 236)
-
-                if !model.outputItems.isEmpty {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(model.outputItems) { item in
-                                outputBubble(for: item)
-                            }
-                        }
-                        .frame(width: 236, alignment: .leading)
-                        .padding(.vertical, outputFadeHeight)
-                    }
-                    .scrollClipDisabled()
-                    .frame(maxWidth: 236, maxHeight: 300)
-                    .onScrollGeometryChange(for: CGFloat.self) { geo in
-                        geo.contentOffset.y
-                    } action: { _, newY in
-                        scrollOffset = newY
-                    }
-                    .mask {
-                        VStack(spacing: 0) {
-                            LinearGradient(
-                                colors: [.clear, .black],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .frame(height: showTopFade ? outputFadeHeight : 0)
-                            Rectangle()
-                                .fill(.black)
-                            LinearGradient(
-                                colors: [.black, .clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .frame(height: outputFadeHeight)
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.18), value: showTopFade)
-                }
+                .opacity(model.isRetreating ? 0 : 1)
+                .animation(.easeOut(duration: 0.08), value: model.isRetreating)
             }
         }
         .padding(.top, 6)
-        .frame(width: model.isVoiceEnabled ? 180 : 260, height: model.isVoiceEnabled ? 90 : 450, alignment: .top)
+        .frame(width: model.isVoiceEnabled ? 180 : 260, height: model.isVoiceEnabled ? 116 : 450, alignment: .top)
         .shadow(color: .black.opacity(0.25), radius: 8, y: 5)
         .padding(shadowInset)
-        .frame(width: model.isVoiceEnabled ? 204 : 284, height: model.isVoiceEnabled ? 114 : 474, alignment: .top)
+        .frame(width: model.isVoiceEnabled ? 204 : 284, height: model.isVoiceEnabled ? 140 : 474, alignment: .top)
         .onAppear {
             requestPromptFocus()
         }
-        .onChange(of: model.isPeeked) { isPeeked in
+        .onChange(of: model.isPeeked) { _, isPeeked in
             if isPeeked {
                 requestPromptFocus()
             } else {
                 isPromptFocused = false
             }
         }
-        .onChange(of: model.isVoiceEnabled) { _ in
+        .onChange(of: model.isVoiceEnabled) {
             requestPromptFocus()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
@@ -204,6 +210,12 @@ struct NotchPanelView: View {
         let prompt = model.textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             model.retreatGhost()
+            return
+        }
+
+        if prompt.lowercased() == "clear" {
+            model.outputItems.removeAll()
+            model.textDraft = ""
             return
         }
 
@@ -322,7 +334,7 @@ private final class QuickLookImagePreview: NSObject, QLPreviewPanelDataSource, Q
 
     private var previewURL: URL?
 
-    func present(url: URL) {
+    @MainActor func present(url: URL) {
         previewURL = url
         guard let panel = QLPreviewPanel.shared() else { return }
         panel.dataSource = self
@@ -346,6 +358,7 @@ private struct PromptTextField: NSViewRepresentable {
     let focusRequestID: Int
     let onFocusChanged: (Bool) -> Void
     let onCancel: () -> Void
+    let onCursorMoved: ((CGPoint) -> Void)?
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -370,6 +383,7 @@ private struct PromptTextField: NSViewRepresentable {
         textField.font = .systemFont(ofSize: 13, weight: .medium)
         textField.textColor = .labelColor
         textField.translatesAutoresizingMaskIntoConstraints = false
+        context.coordinator.observeSelectionChanges(in: textField)
         return textField
     }
 
@@ -391,12 +405,52 @@ private struct PromptTextField: NSViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: PromptTextField
         var lastFocusRequestID = -1
+        nonisolated(unsafe) private var selectionObserver: NSObjectProtocol?
 
         init(_ parent: PromptTextField) {
             self.parent = parent
+        }
+
+        func observeSelectionChanges(in textField: NSTextField) {
+            selectionObserver = NotificationCenter.default.addObserver(
+                forName: NSTextView.didChangeSelectionNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self, weak textField] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let textField,
+                          let editor = textField.currentEditor() as? NSTextView,
+                          let window = textField.window,
+                          let onCursorMoved = self.parent.onCursorMoved else { return }
+
+                    let fieldFrameInWindow = textField.convert(textField.bounds, to: nil)
+                    let fieldFrameInScreen = window.convertToScreen(fieldFrameInWindow)
+
+                    let range = editor.selectedRange()
+                    var actualRange = NSRange()
+                    let cursorRect = editor.firstRect(forCharacterRange: range, actualRange: &actualRange)
+
+                    let cursorX: CGFloat
+                    if cursorRect == .zero || cursorRect.midX > fieldFrameInScreen.maxX || cursorRect.midX < fieldFrameInScreen.minX {
+                        cursorX = cursorRect.midX > fieldFrameInScreen.maxX || cursorRect == .zero
+                            ? fieldFrameInScreen.maxX
+                            : fieldFrameInScreen.minX
+                    } else {
+                        cursorX = cursorRect.midX
+                    }
+                    onCursorMoved(CGPoint(x: cursorX, y: fieldFrameInScreen.midY))
+                }
+            }
+        }
+
+        deinit {
+            if let obs = selectionObserver {
+                NotificationCenter.default.removeObserver(obs)
+            }
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
@@ -412,6 +466,7 @@ private struct PromptTextField: NSViewRepresentable {
             if parent.text != textField.stringValue {
                 parent.text = textField.stringValue
             }
+            // Cursor position reporting is handled by the selection-change observer.
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

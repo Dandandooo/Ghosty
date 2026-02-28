@@ -21,14 +21,6 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [
                 .process("Resources")
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-Xlinker", "-sectcreate",
-                    "-Xlinker", "__TEXT",
-                    "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/GhostyApp/Info.plist"
-                ])
             ]
         )
     ]

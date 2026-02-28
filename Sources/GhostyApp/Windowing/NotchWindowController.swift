@@ -6,15 +6,16 @@ private final class KeyablePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+@MainActor
 final class NotchWindowController {
     private let panel: NSPanel
-    private let compactPanelSize = NSSize(width: 204, height: 114)
+    private let compactPanelSize = NSSize(width: 204, height: 140)
     private let expandedPanelSize = NSSize(width: 284, height: 474)
     private let peekOffset: CGFloat = 44
     private var panelSize: NSSize
     private var isPeeked = false
 
-    @MainActor init<Content: View>(rootView: Content) {
+    init<Content: View>(rootView: Content) {
         panelSize = compactPanelSize
 
         panel = KeyablePanel(

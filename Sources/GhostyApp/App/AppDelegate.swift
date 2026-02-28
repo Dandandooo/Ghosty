@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: GlobalHotkeyManager?
     private var speechListener: SpeechListener?
     private var wakeWordDetector: WakeWordDetector?
+    private var micLevelMonitor: MicLevelMonitor?
     private var escapeMonitor: Any?
     private var subscriptions = Set<AnyCancellable>()
 
@@ -55,6 +56,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { [weak self] enabled in
                 self?.notchWindowController?.setTextInputVisible(!enabled, animated: true)
+            }
+            .store(in: &subscriptions)
+
+        Publishers.CombineLatest(model.$isPeeked, model.$isVoiceEnabled)
+            .map { isPeeked, isVoice in isPeeked && isVoice }
+            .removeDuplicates()
+            .sink { [weak self] shouldMonitor in
+                guard let self else { return }
+                if shouldMonitor {
+                    let monitor = MicLevelMonitor()
+                    monitor.onLevel = { [weak self] level in
+                        self?.model.micLevel = level
+                    }
+                    monitor.start()
+                    self.micLevelMonitor = monitor
+                } else {
+                    self.micLevelMonitor?.stop()
+                    self.micLevelMonitor = nil
+                    self.model.micLevel = 0
+                }
             }
             .store(in: &subscriptions)
 
@@ -107,11 +128,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 if state == .listening, self.voiceEnabled {
                     if self.speechListener == nil {
-                        self.speechListener = SpeechListener(onCommand: { [weak self] phrase in
+                        let listener = SpeechListener(onCommand: { [weak self] phrase in
                             Task { @MainActor in
-                                self?.model.submitIntent(phrase)
+                                guard let self else { return }
+                                switch phrase {
+                                case "ghost", "ghost start", "hey ghost", "hey ghosty":
+                                    NSApp.activate(ignoringOtherApps: true)
+                                    self.model.togglePeekAndListenMode()
+                                case "ghost stop", "bye ghost", "bye ghosty":
+                                    self.model.retreatGhost()
+                                case "ghost status":
+                                    self.model.showMessage("It's looking good, brev")
+                                default:
+                                    self.model.submitIntent(phrase)
+                                }
                             }
                         })
+                        listener.wakeCommands = ["ghost", "ghost start", "hey ghost", "hey ghosty"]
+                        self.speechListener = listener
                     }
                     self.speechListener?.startListening()
                 } else {
