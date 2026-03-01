@@ -5,8 +5,15 @@ import SwiftUI
 struct MCPServerOption: Identifiable {
     let id: String
     let name: String
-    let iconName: String          // SF Symbol
     let requiresAPIKey: Bool
+    /// Has an API key that is accepted but not required (e.g. Context7).
+    let optionalAPIKey: Bool
+    /// The npx/uvx command to launch this MCP server.
+    let command: String
+    /// Arguments passed to the command.
+    let args: [String]
+    /// Environment-variable name that carries the API key, if any.
+    let envKeyName: String?
     var apiKey: String = ""
     var isSelected: Bool = false
 }
@@ -14,7 +21,11 @@ struct MCPServerOption: Identifiable {
 struct SkillOption: Identifiable {
     let id: String
     let name: String
-    let iconName: String
+    let iconName: String              // SF Symbol for skills with no brand icon
+    /// Base skill id used to detect if a brand icon override applies.
+    let brandIconID: String?
+    /// Filename of the bundled zip in DefaultSkills (e.g. "find-skills-0.1.0.zip").
+    let zipFileName: String
     var isSelected: Bool = false
 }
 
@@ -37,17 +48,49 @@ final class OnboardingViewModel: ObservableObject {
     @Published var selectedTheme: String = "og"
 
     @Published var mcpServers: [MCPServerOption] = [
-        MCPServerOption(id: "github", name: "GitHub", iconName: "cat.fill", requiresAPIKey: true),
-        MCPServerOption(id: "context7", name: "Context7", iconName: "7.circle.fill", requiresAPIKey: false),
-        MCPServerOption(id: "playwright", name: "Playwright", iconName: "theatermasks.fill", requiresAPIKey: false),
-        MCPServerOption(id: "notion", name: "Notion", iconName: "note.text", requiresAPIKey: true),
+        MCPServerOption(
+            id: "github",
+            name: "GitHub",
+            requiresAPIKey: true,
+            optionalAPIKey: false,
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-github"],
+            envKeyName: "GITHUB_PERSONAL_ACCESS_TOKEN"
+        ),
+        MCPServerOption(
+            id: "context7",
+            name: "Context7",
+            requiresAPIKey: false,
+            optionalAPIKey: true,
+            command: "npx",
+            args: ["-y", "@upstash/context7-mcp"],
+            envKeyName: "CONTEXT7_API_KEY"
+        ),
+        MCPServerOption(
+            id: "playwright",
+            name: "Playwright",
+            requiresAPIKey: false,
+            optionalAPIKey: false,
+            command: "npx",
+            args: ["-y", "@playwright/mcp@latest"],
+            envKeyName: nil
+        ),
+        MCPServerOption(
+            id: "notion",
+            name: "Notion",
+            requiresAPIKey: true,
+            optionalAPIKey: false,
+            command: "npx",
+            args: ["-y", "@notionhq/notion-mcp-server"],
+            envKeyName: "NOTION_API_KEY"
+        ),
     ]
 
     @Published var skills: [SkillOption] = [
-        SkillOption(id: "find_skills", name: "Find Skills", iconName: "magnifyingglass"),
-        SkillOption(id: "nano_banana", name: "Nano Banana", iconName: "leaf.fill"),
-        SkillOption(id: "github_cli", name: "Github CLI", iconName: "terminal.fill"),
-        SkillOption(id: "moltbook", name: "Moltbook", iconName: "book.fill"),
+        SkillOption(id: "find-skills",    name: "Find Skills",    iconName: "magnifyingglass",  brandIconID: nil,       zipFileName: "find-skills-0.1.0.zip"),
+        SkillOption(id: "github",         name: "GitHub",         iconName: "terminal.fill",    brandIconID: "github",  zipFileName: "github-1.0.0.zip"),
+        SkillOption(id: "nano-banana-pro",name: "Nano Banana",    iconName: "sparkles",         brandIconID: nil,       zipFileName: "nano-banana-pro-1.0.1.zip"),
+        SkillOption(id: "weather",        name: "Weather",        iconName: "cloud.sun.fill",   brandIconID: nil,       zipFileName: "weather-1.0.0.zip"),
     ]
 
     @Published var apiKeyPopoverServerID: String? = nil
@@ -102,6 +145,12 @@ final class OnboardingViewModel: ObservableObject {
         }
 
         if server.requiresAPIKey {
+            // Required key — must enter before confirming selection.
+            pendingAPIKey = ""
+            apiKeyPopoverServerID = id
+        } else if server.optionalAPIKey {
+            // Optional key — select immediately, then offer the sheet.
+            mcpServers[idx].isSelected = true
             pendingAPIKey = ""
             apiKeyPopoverServerID = id
         } else {
@@ -134,6 +183,18 @@ final class OnboardingViewModel: ObservableObject {
         sm.userName = userName
         sm.personalizationPrompt = personalizationPrompt
         sm.selectedThemeID = selectedTheme
+
+        // Write selected MCP servers to the config file.
+        let selectedServers = mcpServers.filter { $0.isSelected }
+        sm.writeMCPConfig(servers: selectedServers)
+
+        // Install selected default skills.
+        let selectedSkills = skills.filter { $0.isSelected }
+        for skill in selectedSkills {
+            sm.installDefaultSkill(zipFileName: skill.zipFileName)
+        }
+        sm.reloadSkills()
+
         sm.hasCompletedOnboarding = true
         onComplete?()
     }
@@ -427,26 +488,23 @@ private struct MCPCardView: View {
 
 private struct MCPIcon: View {
     let server: MCPServerOption
+    let size: CGFloat = 24
 
     var body: some View {
         Group {
             switch server.id {
             case "github":
-                // GitHub logo-like mark
-                Image(systemName: "cat.fill")
-                    .font(.system(size: 22))
-            case "context7":
-                Text("C7")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-            case "playwright":
-                Image(systemName: "theatermasks.fill")
-                    .font(.system(size: 22))
+                GitHubMarkShape()
+                    .frame(width: size, height: size)
             case "notion":
-                Image(systemName: "note.text")
-                    .font(.system(size: 22))
+                NotionMarkView(size: size)
+            case "playwright":
+                PlaywrightMarkView(size: size)
+            case "context7":
+                Context7MarkView(size: size + 2)
             default:
                 Image(systemName: "server.rack")
-                    .font(.system(size: 22))
+                    .font(.system(size: size - 2))
             }
         }
         .foregroundStyle(.primary)
@@ -456,25 +514,31 @@ private struct MCPIcon: View {
 private struct APIKeySheet: View {
     @ObservedObject var vm: OnboardingViewModel
 
-    private var serverName: String {
-        vm.mcpServers.first(where: { $0.id == vm.apiKeyPopoverServerID })?.name ?? "Server"
+    private var server: MCPServerOption? {
+        vm.mcpServers.first(where: { $0.id == vm.apiKeyPopoverServerID })
     }
+    private var serverName: String { server?.name ?? "Server" }
+    private var isOptional: Bool { server?.optionalAPIKey == true && !(server?.requiresAPIKey ?? false) }
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Enter API Key")
+            Text(isOptional ? "API Key (Optional)" : "Enter API Key")
                 .font(.headline)
 
-            Text("\(serverName) requires an API key to connect.")
+            Text(isOptional
+                 ? "\(serverName) can use an API key for higher rate limits and private access. You can skip this now and add it later in Settings."
+                 : "\(serverName) requires an API key to connect.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
 
             SecureField("API Key", text: $vm.pendingAPIKey)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 300)
 
             HStack(spacing: 12) {
-                Button("Cancel") {
+                Button(isOptional ? "Skip" : "Cancel") {
                     vm.cancelAPIKey()
                 }
                 .buttonStyle(.bordered)
@@ -483,11 +547,11 @@ private struct APIKeySheet: View {
                     vm.confirmAPIKey()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(vm.pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!isOptional && vm.pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
-        .frame(minWidth: 340)
+        .frame(minWidth: 360)
     }
 }
 
@@ -531,9 +595,7 @@ private struct SkillCardView: View {
             vm.toggleSkill(skill.id)
         } label: {
             VStack(spacing: 8) {
-                Image(systemName: skill.iconName)
-                    .font(.system(size: 22))
-                    .foregroundStyle(.primary)
+                SkillIcon(skill: skill)
                     .frame(width: 36, height: 36)
 
                 Text(skill.name)
@@ -555,6 +617,24 @@ private struct SkillCardView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SkillIcon: View {
+    let skill: SkillOption
+    let size: CGFloat = 24
+
+    var body: some View {
+        Group {
+            if skill.brandIconID == "github" {
+                GitHubMarkShape()
+                    .frame(width: size, height: size)
+            } else {
+                Image(systemName: skill.iconName)
+                    .font(.system(size: size - 2))
+            }
+        }
+        .foregroundStyle(.primary)
     }
 }
 
