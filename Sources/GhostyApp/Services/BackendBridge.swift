@@ -36,6 +36,7 @@ final class BackendBridge: @unchecked Sendable {
         onComplete: @escaping @Sendable (Result<Void, Error>) -> Void
     ) throws {
         let scriptURL = try pythonTemplateScriptURL()
+        print("[DEBUG] runPythonTemplateStreaming: backendScript=\(backendScript), scriptURL=\(scriptURL.path)")
         let process = Process()
 
         let venvURL = scriptURL.deletingLastPathComponent()

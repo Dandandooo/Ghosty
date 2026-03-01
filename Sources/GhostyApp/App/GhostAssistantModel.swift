@@ -38,11 +38,24 @@ final class GhostAssistantModel: ObservableObject {
     @Published var ignoresMouseEvents: Bool = false
     @Published var isWindowVisible: Bool = true
 
+    /// When true, uses the simple no_backend.py (conversational mode) instead of orchestrator
+    var useNoBackend: Bool = true {
+        didSet {
+            backendBridge.backendScript = useNoBackend ? "no_backend" : "template_backend"
+        }
+    }
+
     var isSleeping: Bool {
         assistantState == .hidden
     }
 
-    private let backendBridge = BackendBridge()
+    private let backendBridge: BackendBridge
+
+    init() {
+        backendBridge = BackendBridge()
+        // Set initial value since didSet doesn't fire during init
+        backendBridge.backendScript = "no_backend"
+    }
     private var retreatTask: Task<Void, Never>?
     private var actionHistory: [String] = []
     private var pendingNewlines = 0
@@ -77,9 +90,10 @@ final class GhostAssistantModel: ObservableObject {
     }
 
     func submitTextIntent(_ intent: String) {
+        print("[DEBUG] submitTextIntent called - useNoBackend=\(useNoBackend)")
         let trimmed = intent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        
+
         // Prevent re-entry: reject if already working or just completed
         guard assistantState != .working && assistantState != .complete else {
             print("submitTextIntent: Rejected re-entry (state=\(assistantState))")
@@ -381,6 +395,7 @@ final class GhostAssistantModel: ObservableObject {
     // MARK: - Streaming Chat (used by no_backend / conversational mode)
 
     func submitStreamingIntent(_ intent: String) {
+        print("[DEBUG] submitStreamingIntent called - useNoBackend=\(useNoBackend)")
         let trimmed = intent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 

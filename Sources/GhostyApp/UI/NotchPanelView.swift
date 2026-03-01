@@ -234,7 +234,11 @@ struct NotchPanelView: View {
         model.isSubmittingText = true
 
         if !model.isVoiceEnabled {
-            model.submitTextIntent(prompt)
+            if model.useNoBackend {
+                model.submitStreamingIntent(prompt)
+            } else {
+                model.submitTextIntent(prompt)
+            }
         } else {
             model.submitIntent(prompt)
         }
