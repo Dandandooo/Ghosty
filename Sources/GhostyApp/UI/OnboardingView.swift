@@ -42,7 +42,13 @@ final class OnboardingViewModel: ObservableObject {
         case thankYou
     }
 
+    enum NavigationDirection {
+        case forward
+        case backward
+    }
+
     @Published var phase: Phase = .name
+    @Published private(set) var navigationDirection: NavigationDirection = .forward
     @Published var userName: String = ""
     @Published var personalizationPrompt: String = ""
     @Published var selectedTheme: String = "og"
@@ -115,6 +121,7 @@ final class OnboardingViewModel: ObservableObject {
             finish()
             return
         }
+        navigationDirection = .forward
         withAnimation(.easeInOut(duration: 0.35)) {
             phase = next
         }
@@ -128,6 +135,7 @@ final class OnboardingViewModel: ObservableObject {
 
     func goBack() {
         guard let prev = Phase(rawValue: phase.rawValue - 1) else { return }
+        navigationDirection = .backward
         withAnimation(.easeInOut(duration: 0.35)) {
             phase = prev
         }
@@ -206,6 +214,21 @@ struct OnboardingView: View {
     @StateObject private var vm = OnboardingViewModel()
     var onComplete: (() -> Void)?
 
+    private var phaseTransition: AnyTransition {
+        switch vm.navigationDirection {
+        case .forward:
+            return .asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)
+            )
+        case .backward:
+            return .asymmetric(
+                insertion: .move(edge: .leading).combined(with: .opacity),
+                removal: .move(edge: .trailing).combined(with: .opacity)
+            )
+        }
+    }
+
     var body: some View {
         ZStack {
             // Background
@@ -218,40 +241,22 @@ struct OnboardingView: View {
                     switch vm.phase {
                     case .name:
                         NamePhaseView(vm: vm)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .transition(phaseTransition)
                     case .personalization:
                         PersonalizationPhaseView(vm: vm)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .transition(phaseTransition)
                     case .mcpSelection:
                         MCPSelectionPhaseView(vm: vm)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .transition(phaseTransition)
                     case .skillsSelection:
                         SkillsSelectionPhaseView(vm: vm)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .transition(phaseTransition)
                     case .themeSelection:
                         ThemeSelectionPhaseView(vm: vm)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .transition(phaseTransition)
                     case .thankYou:
                         ThankYouPhaseView(vm: vm)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .transition(phaseTransition)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
