@@ -42,8 +42,10 @@ struct GhostCharacterView: View {
         let ghostShape = ThemeBodyShape(provider: theme.bodyShape, phase: flapPhase)
         let bodyH = size * bodyAppearance.heightMultiplier
 
+        let bodyFlip: CGFloat = theme.bodyFlipped ? -1 : 1
+
         ZStack {
-            // Body fill
+            // Body fill + outline (flipped when theme requires)
             ghostShape
                 .fill(
                     LinearGradient(
@@ -120,6 +122,7 @@ struct GhostCharacterView: View {
             accessoriesLayer(for: .aboveEyes, bodyH: bodyH)
         }
         .frame(width: size, height: bodyH)
+        .scaleEffect(y: bodyFlip)
         .contentShape(Rectangle())
         .background(
             GhostScreenFrameReader { frame in
@@ -237,7 +240,13 @@ struct GhostCharacterView: View {
 
         ZStack {
             ForEach(Array(theme.eyes.enumerated()), id: \.offset) { idx, eyeCfg in
-                let snapped = pixelSnapped(idx < offsets.count ? offsets[idx] : .zero)
+                let raw = idx < offsets.count ? offsets[idx] : .zero
+                // When the whole ghost is flipped, the SwiftUI Y axis is inverted,
+                // so we must negate the Y component to keep gaze direction correct.
+                let corrected = theme.bodyFlipped
+                    ? CGSize(width: raw.width, height: -raw.height)
+                    : raw
+                let snapped = pixelSnapped(corrected)
                 let scleraW = pixelSnapped(size * eyeCfg.scleraWidthRatio)
                 let scleraH = pixelSnapped(size * eyeCfg.scleraHeightRatio)
                 let strokeW = pixelSnapped(max(0.8, size * eyeCfg.scleraStrokeWidthRatio))
@@ -375,9 +384,12 @@ struct GhostCharacterView: View {
         let bodyH = size * bodyAppearance.heightMultiplier
         let eyeCenterXInView = size / 2 + size * eyeCfg.relativeX
         let eyeCenterYInView = bodyH / 2 + size * eyeCfg.relativeY
+        // When the whole ghost is flipped vertically, the eye's Y within the
+        // frame is mirrored: offset from top becomes offset from bottom.
+        let effectiveY = theme.bodyFlipped ? bodyH - eyeCenterYInView : eyeCenterYInView
         return CGPoint(
             x: ghostFrameInScreen.minX + eyeCenterXInView,
-            y: ghostFrameInScreen.maxY - eyeCenterYInView
+            y: ghostFrameInScreen.maxY - effectiveY
         )
     }
 

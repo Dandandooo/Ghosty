@@ -12,6 +12,7 @@ enum AssistantState: String, Codable {
 struct AssistantOutputItem: Identifiable {
     enum Content {
         case text(String)
+        case streamingText(String)   // in-progress bubble; finalised to .text on newline / completion
         case image(resourceName: String)
         case userMessage(String)
     }
@@ -79,23 +80,73 @@ final class GhostAssistantModel: ObservableObject {
         assistantState = .working
 
         outputItems.append(AssistantOutputItem(content: .userMessage(trimmed)))
+        // Seed the first streaming bubble
+        outputItems.append(AssistantOutputItem(content: .streamingText("")))
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let response = try self.backendBridge.runPythonTemplate(input: trimmed)
-                self.appendOutput(from: response)
-                self.assistantState = .idle
-            } catch {
-                self.outputItems.append(
-                    AssistantOutputItem(content: .text("Template response: backend unavailable for \"\(trimmed)\"."))
-                )
-                self.assistantState = .idle
-                print("Python backend invocation failed: \(error)")
-            }
-
-            self.isSubmittingText = false
+        do {
+            try backendBridge.runPythonTemplateStreaming(
+                input: trimmed,
+                onChunk: { [weak self] chunk in
+                    DispatchQueue.main.async {
+                        self?.processStreamingChunk(chunk)
+                    }
+                },
+                onComplete: { [weak self] result in
+                    DispatchQueue.main.async {
+                        self?.finishStreaming(result: result)
+                    }
+                }
+            )
+        } catch {
+            // Launch failed immediately – tidy up and show error
+            if case .streamingText = outputItems.last?.content { outputItems.removeLast() }
+            outputItems.append(AssistantOutputItem(content: .text("Backend unavailable: \(error.localizedDescription)")))
+            isSubmittingText = false
+            assistantState = .idle
         }
+    }
+
+    private func processStreamingChunk(_ chunk: String) {
+        for char in chunk {
+            if char == "\n" {
+                // Finalise current bubble if non-empty, then open a fresh one
+                if case .streamingText(let text) = outputItems.last?.content {
+                    if text.trimmingCharacters(in: .whitespaces).isEmpty {
+                        // Reuse the empty bubble for the next line
+                    } else {
+                        outputItems[outputItems.count - 1] =
+                            AssistantOutputItem(content: .text(text))
+                        outputItems.append(AssistantOutputItem(content: .streamingText("")))
+                    }
+                }
+            } else {
+                if case .streamingText(let text) = outputItems.last?.content {
+                    outputItems[outputItems.count - 1] =
+                        AssistantOutputItem(content: .streamingText(text + String(char)))
+                } else {
+                    outputItems.append(AssistantOutputItem(content: .streamingText(String(char))))
+                }
+            }
+        }
+    }
+
+    private func finishStreaming(result: Result<Void, Error>) {
+        // Finalise the dangling streaming bubble
+        if case .streamingText(let text) = outputItems.last?.content {
+            if text.trimmingCharacters(in: .whitespaces).isEmpty {
+                outputItems.removeLast()
+            } else {
+                outputItems[outputItems.count - 1] =
+                    AssistantOutputItem(content: .text(text))
+            }
+        }
+
+        if case .failure(let error) = result {
+            outputItems.append(AssistantOutputItem(content: .text("Error: \(error.localizedDescription)")))
+        }
+
+        isSubmittingText = false
+        assistantState = .idle
     }
 
     private func appendOutput(from response: String) {

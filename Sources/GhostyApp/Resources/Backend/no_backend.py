@@ -6,6 +6,15 @@ def main() -> int:
     time.sleep(1)
     # GhostyApp expects the response on stdout
     print(f'Bro actually said: "{text}"')
+    for word in "THIS IS GHOSTY FOR REAL".split():
+        time.sleep(0.25)
+        print(word, end=' ', flush=True)
+    print()
+    for i in range(10):
+        time.sleep(0.1)
+        print(i, end=' ', flush=True)
+    print()
+
     return 0
 
 if __name__ == "__main__":

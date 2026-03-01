@@ -232,9 +232,32 @@ struct GhostTheme: Identifiable, Sendable {
     let id: String
     let displayName: String
     let bodyShape: any GhostBodyShapeProvider & Sendable
+    /// When `true` the body silhouette is rendered upside-down while the
+    /// face (eyes, mouth) and accessories keep their normal orientation.
+    let bodyFlipped: Bool
     let bodyAppearance: GhostBodyAppearance
     let eyes: [GhostEyeConfig]
     let mouth: GhostMouthConfig?
     let animation: GhostAnimationConfig
     var accessories: [GhostAccessoryConfig] = []
+
+    init(
+        id: String,
+        displayName: String,
+        bodyShape: any GhostBodyShapeProvider & Sendable,
+        bodyFlipped: Bool = false,
+        bodyAppearance: GhostBodyAppearance,
+        eyes: [GhostEyeConfig],
+        mouth: GhostMouthConfig?,
+        animation: GhostAnimationConfig
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.bodyShape = bodyShape
+        self.bodyFlipped = bodyFlipped
+        self.bodyAppearance = bodyAppearance
+        self.eyes = eyes
+        self.mouth = mouth
+        self.animation = animation
+    }
 }

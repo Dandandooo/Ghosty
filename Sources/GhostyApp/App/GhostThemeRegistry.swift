@@ -16,7 +16,7 @@ final class GhostThemeRegistry {
             OGGhostTheme.theme,
             AlienGhostTheme.theme,
             WildWestGhostTheme.theme,
-            BlingyGhostTheme.theme,
+            DinnerboneGhostTheme.theme,
             NighttimeGhostTheme.theme,
         ]
     }

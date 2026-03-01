@@ -246,6 +246,35 @@ struct NotchPanelView: View {
     }
 
     @ViewBuilder
+    private func ghostyTextBubble(text: String, streaming: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ghosty")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 0) {
+                Text(text.isEmpty && streaming ? " " : text)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                if streaming {
+                    StreamingCursorView()
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 236, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
+        )
+    }
+
+    @ViewBuilder
     private func userMessageBubble(text: String) -> some View {
         HStack {
             Spacer(minLength: 32)
@@ -273,27 +302,11 @@ struct NotchPanelView: View {
         case let .userMessage(text):
             userMessageBubble(text: text)
 
+        case let .streamingText(text):
+            ghostyTextBubble(text: text, streaming: true)
+
         case let .text(text):
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Ghosty")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(text)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(width: 236, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
-            )
+            ghostyTextBubble(text: text, streaming: false)
 
         case let .image(resourceName):
             VStack(alignment: .leading, spacing: 8) {
@@ -355,6 +368,22 @@ struct NotchPanelView: View {
         }
 
         return nil
+    }
+}
+
+private struct StreamingCursorView: View {
+    @State private var visible = true
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.6))
+            .frame(width: 2, height: 12)
+            .opacity(visible ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    visible = false
+                }
+            }
     }
 }
 
