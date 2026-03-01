@@ -10,6 +10,9 @@ struct BackendStateUpdate: Decodable {
 final class BackendBridge: @unchecked Sendable {
     var onStateUpdate: ((BackendStateUpdate) -> Void)?
 
+    /// Which bundled Python script to run: "template_backend" or "no_backend"
+    var backendScript: String = "template_backend"
+
     private var stateFileMonitor: StateFileMonitor?
 
     func runGemini(prompt: String) async throws -> String {
@@ -25,9 +28,71 @@ final class BackendBridge: @unchecked Sendable {
         return response.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Launches the bundled Python script and streams its stdout back via `onChunk`.
+    /// `onChunk` and `onComplete` are called on a background dispatch queue.
+    func runPythonTemplateStreaming(
+        input: String,
+        onChunk: @escaping @Sendable (String) -> Void,
+        onComplete: @escaping @Sendable (Result<Void, Error>) -> Void
+    ) throws {
+        let scriptURL = try pythonTemplateScriptURL()
+        let process = Process()
+
+        let venvURL = scriptURL.deletingLastPathComponent()
+            .appendingPathComponent(".venv/bin/python3")
+        if FileManager.default.fileExists(atPath: venvURL.path) {
+            process.executableURL = venvURL
+            process.arguments = [scriptURL.path, input]
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["python3", scriptURL.path, input]
+        }
+
+        let outputPipe = Pipe()
+        let errorPipe  = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError  = errorPipe
+
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            onChunk(text)
+        }
+
+        process.terminationHandler = { process in
+            outputPipe.fileHandleForReading.readabilityHandler = nil
+            if process.terminationStatus == 0 {
+                onComplete(.success(()))
+            } else {
+                let errData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let errText = String(decoding: errData, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                onComplete(.failure(NSError(
+                    domain: "Ghosty.BackendBridge",
+                    code: 3,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: errText.isEmpty
+                            ? "Script exited with status \(process.terminationStatus)."
+                            : errText
+                    ]
+                )))
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            throw NSError(
+                domain: "Ghosty.BackendBridge",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to launch bundled Python script via python3."]
+            )
+        }
+    }
+
     private func runBundledPythonScript(scriptURL: URL, input: String) throws -> String {
         let process = Process()
-        
+
         // Try to find a valid python3 executable in potential .venv locations
         let venvCandidates: [URL] = [
             // 1. Absolute path from compilation time (source-level uv .venv)
@@ -102,10 +167,11 @@ final class BackendBridge: @unchecked Sendable {
     }
 
     private func pythonTemplateScriptURL() throws -> URL {
+        let scriptName = backendScript
         let directCandidates: [URL?] = [
-            Bundle.module.url(forResource: "template_backend", withExtension: "py"),
-            Bundle.module.url(forResource: "template_backend", withExtension: "py", subdirectory: "Backend"),
-            Bundle.module.url(forResource: "template_backend", withExtension: "py", subdirectory: "Resources/Backend")
+            Bundle.module.url(forResource: scriptName, withExtension: "py"),
+            Bundle.module.url(forResource: scriptName, withExtension: "py", subdirectory: "Backend"),
+            Bundle.module.url(forResource: scriptName, withExtension: "py", subdirectory: "Resources/Backend")
         ]
 
         if let match = directCandidates.compactMap({ $0 }).first {
@@ -119,7 +185,7 @@ final class BackendBridge: @unchecked Sendable {
             options: [.skipsHiddenFiles]
            ) {
             for case let url as URL in enumerator {
-                if url.lastPathComponent == "template_backend.py" {
+                if url.lastPathComponent == "\(scriptName).py" {
                     return url
                 }
             }

@@ -9,15 +9,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var heyGhostyEnabled = false
     private var notchWindowController: NotchWindowController?
     private var menuBarController: MenuBarController?
+    private var settingsManager: SettingsManager?
+    private var settingsWindowController: SettingsWindowController?
     private var hotkeyManager: GlobalHotkeyManager?
     private var speechListener: SpeechListener?
     private var wakeWordDetector: WakeWordDetector?
     private var micLevelMonitor: MicLevelMonitor?
     private var escapeMonitor: Any?
+    private var commaMonitor: Any?
+    private var onboardingWindowController: OnboardingWindowController?
     private var subscriptions = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
+
+        let sm = SettingsManager.shared
+        settingsManager = sm
+
+        if !sm.hasCompletedOnboarding {
+            showOnboarding()
+        } else {
+            finishLaunching()
+        }
+    }
+
+    /// Presents the first-run onboarding window. Normal ghost setup is deferred
+    /// until the user completes (or closes) the onboarding flow.
+    private func showOnboarding() {
+        let controller = OnboardingWindowController()
+        controller.onComplete = { [weak self] in
+            self?.onboardingWindowController = nil
+            self?.finishLaunching()
+        }
+        onboardingWindowController = controller
+
+        // Temporarily switch to regular app so the onboarding window appears.
+        NSApp.setActivationPolicy(.regular)
+        controller.showWindow()
+    }
+
+    /// Called after onboarding (or immediately on subsequent launches) to set up
+    /// the ghost panel, menu bar, and all supporting subsystems.
+    private func finishLaunching() {
         model.isVoiceEnabled = voiceEnabled
 
         let panelView = NotchPanelView(model: model)
@@ -25,9 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchWindowController = controller
         menuBarController = MenuBarController()
 
+        settingsWindowController = SettingsWindowController(settingsManager: settingsManager!)
+
         bindModelToWindow()
         configureHotkey()
         configureEscapeKey()
+        configureCommaShortcut()
         configureSpeechListener()
         configureMenuBar()
         syncWakeWordDetector()
@@ -139,6 +175,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Intercept ⌘, globally so it always opens our custom settings window
+    /// (instead of the empty SwiftUI Settings scene).
+    private func configureCommaShortcut() {
+        commaMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.modifierFlags.contains(.command),
+                  event.charactersIgnoringModifiers == ","
+            else { return event }
+
+            if self?.model.isPeeked == true {
+                self?.model.retreatGhost()
+            }
+            self?.settingsWindowController?.showWindow()
+            return nil
+        }
+    }
+
     private func configureSpeechListener() {
         model.$assistantState
             .removeDuplicates()
@@ -196,6 +248,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.onHeyGhostyEnabledChanged = { [weak self] enabled in
             Task { @MainActor in
                 self?.setHeyGhostyEnabled(enabled)
+            }
+        }
+
+        menuBarController?.onSettings = { [weak self] in
+            Task { @MainActor in
+                self?.settingsWindowController?.showWindow()
             }
         }
 

@@ -7,56 +7,77 @@ struct NotchPanelView: View {
     @State private var focusRequestID = 0
     @State private var isPromptFocused = false
     @State private var scrollOffset: CGFloat = 0
+    @State private var messagesContentHeight: CGFloat = 0
+    @State private var scrollAnchorID: String? = nil
 
     private let shadowInset: CGFloat = 12
     private let outputFadeHeight: CGFloat = 24
+    private let maxScrollHeight: CGFloat = 236
     private let scrollFadeThreshold: CGFloat = 4
 
     private var showTopFade: Bool { scrollOffset > scrollFadeThreshold }
+    private var showBottomFade: Bool { messagesContentHeight + 2 * outputFadeHeight > maxScrollHeight }
+    private var scrollFrameHeight: CGFloat {
+        messagesContentHeight > 0 ? min(messagesContentHeight + 2 * outputFadeHeight, maxScrollHeight) : 0
+    }
 
     var body: some View {
         VStack(spacing: 12) {
-            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken, isRetreating: model.isRetreating, isVoiceMode: model.isVoiceEnabled, micLevel: model.micLevel)
+            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken, isRetreating: model.isRetreating, isVoiceMode: model.isVoiceEnabled, micLevel: model.micLevel, theme: SettingsManager.shared.selectedTheme)
                 .offset(y: 6)
 
             if !model.isVoiceEnabled {
-                if !model.outputItems.isEmpty {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(model.outputItems) { item in
-                                outputBubble(for: item)
-                            }
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(model.outputItems) { item in
+                            outputBubble(for: item)
                         }
-                        .frame(width: 236, alignment: .leading)
-                        .padding(.vertical, outputFadeHeight)
+                        Color.clear.frame(height: 1).id("scrollBottom")
                     }
-                    .scrollClipDisabled()
-                    .frame(maxWidth: 236, maxHeight: 300)
-                    .onScrollGeometryChange(for: CGFloat.self) { geo in
-                        geo.contentOffset.y
-                    } action: { _, newY in
-                        scrollOffset = newY
+                    .frame(width: 236, alignment: .leading)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { _, h in
+                        messagesContentHeight = h
                     }
-                    .mask {
-                        VStack(spacing: 0) {
-                            LinearGradient(
-                                colors: [.clear, .black],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .frame(height: showTopFade ? outputFadeHeight : 0)
-                            Rectangle()
-                                .fill(.black)
-                            LinearGradient(
-                                colors: [.black, .clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .frame(height: outputFadeHeight)
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.18), value: showTopFade)
+                    .padding(.vertical, outputFadeHeight)
                 }
+                .scrollPosition(id: $scrollAnchorID, anchor: .bottom)
+                .scrollClipDisabled()
+                .frame(width: 236, height: scrollFrameHeight)
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.y
+                } action: { _, newY in
+                    scrollOffset = newY
+                }
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, .black],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: showTopFade ? outputFadeHeight : 0)
+                        Rectangle()
+                            .fill(.black)
+                        LinearGradient(
+                            colors: [.black, .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: showBottomFade ? outputFadeHeight : 0)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.18), value: showTopFade)
+                .animation(.easeInOut(duration: 0.18), value: showBottomFade)
+                .animation(.spring(response: 0.35, dampingFraction: 0.82), value: scrollFrameHeight)
+                .onChange(of: messagesContentHeight) { _, newHeight in
+                    guard newHeight + 2 * outputFadeHeight > maxScrollHeight else { return }
+                    scrollAnchorID = nil
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        scrollAnchorID = "scrollBottom"
+                    }
+                }
+                .opacity(model.isRetreating ? 0 : 1)
+                .animation(.easeOut(duration: 0.08), value: model.isRetreating)
 
                 HStack(spacing: 8) {
                     PromptTextField(
@@ -204,6 +225,7 @@ struct NotchPanelView: View {
         if prompt.lowercased() == "clear" {
             model.outputItems.removeAll()
             model.textDraft = ""
+            scrollAnchorID = nil
             return
         }
 
@@ -230,29 +252,67 @@ struct NotchPanelView: View {
     }
 
     @ViewBuilder
-    private func outputBubble(for item: AssistantOutputItem) -> some View {
-        switch item.content {
-        case let .text(text):
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Ghosty")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(text)
+    private func ghostyTextBubble(text: String, streaming: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ghosty")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 0) {
+                Text(text.isEmpty && streaming ? " " : text)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
+                if streaming {
+                    StreamingCursorView()
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(width: 236, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
-            )
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 236, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
+        )
+    }
+
+    @ViewBuilder
+    private func userMessageBubble(text: String) -> some View {
+        HStack {
+            Spacer(minLength: 32)
+            Text(text)
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(.primary.opacity(0.75))
+                .multilineTextAlignment(.trailing)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white.opacity(0.25))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.6)
+                )
+        }
+        .frame(width: 236, alignment: .trailing)
+    }
+
+    @ViewBuilder
+    private func outputBubble(for item: AssistantOutputItem) -> some View {
+        switch item.content {
+        case let .userMessage(text):
+            userMessageBubble(text: text)
+
+        case let .streamingText(text):
+            ghostyTextBubble(text: text, streaming: true)
+
+        case let .text(text):
+            ghostyTextBubble(text: text, streaming: false)
 
         case let .image(resourceName):
             VStack(alignment: .leading, spacing: 8) {
@@ -314,6 +374,22 @@ struct NotchPanelView: View {
         }
 
         return nil
+    }
+}
+
+private struct StreamingCursorView: View {
+    @State private var visible = true
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.6))
+            .frame(width: 2, height: 12)
+            .opacity(visible ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    visible = false
+                }
+            }
     }
 }
 

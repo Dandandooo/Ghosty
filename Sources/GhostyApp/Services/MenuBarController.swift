@@ -8,8 +8,7 @@ final class MenuBarController: NSObject {
     private let contextMenu = NSMenu()
     private let voiceMenuItem = NSMenuItem(title: "Enable Voice", action: #selector(handleVoiceToggle), keyEquivalent: "")
     private let heyGhostyMenuItem = NSMenuItem(title: "Hey Ghosty", action: #selector(handleHeyGhostyToggle), keyEquivalent: "")
-    private let skillsMenuItem = NSMenuItem(title: "Skills", action: #selector(handleSkills), keyEquivalent: "")
-    private let mcpMenuItem = NSMenuItem(title: "MCP", action: #selector(handleMCP), keyEquivalent: "")
+    private let settingsMenuItem = NSMenuItem(title: "Settings…", action: #selector(handleSettings), keyEquivalent: ",")
     private let quitMenuItem = NSMenuItem(title: "Quit Ghosty", action: #selector(handleQuit), keyEquivalent: "q")
     private var sleeping = true
     private var voiceEnabled = false
@@ -21,6 +20,7 @@ final class MenuBarController: NSObject {
     var onRetreatGhost: (() -> Void)?
     var onVoiceEnabledChanged: ((Bool) -> Void)?
     var onHeyGhostyEnabledChanged: ((Bool) -> Void)?
+    var onSettings: (() -> Void)?
     var onQuit: (() -> Void)?
 
     override init() {
@@ -75,15 +75,14 @@ final class MenuBarController: NSObject {
         heyGhostyMenuItem.isEnabled = voiceEnabled
         heyGhostyMenuItem.indentationLevel = 1
 
-        skillsMenuItem.target = self
-        mcpMenuItem.target = self
+        settingsMenuItem.target = self
 
         quitMenuItem.target = self
 
         contextMenu.addItem(voiceMenuItem)
         contextMenu.addItem(heyGhostyMenuItem)
-        contextMenu.addItem(skillsMenuItem)
-        contextMenu.addItem(mcpMenuItem)
+        contextMenu.addItem(.separator())
+        contextMenu.addItem(settingsMenuItem)
         contextMenu.addItem(.separator())
         contextMenu.addItem(quitMenuItem)
     }
@@ -146,10 +145,9 @@ final class MenuBarController: NSObject {
     }
 
     @objc
-    private func handleSkills() {}
-
-    @objc
-    private func handleMCP() {}
+    private func handleSettings() {
+        onSettings?()
+    }
 
     @objc
     private func handleQuit() {
