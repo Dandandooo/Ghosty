@@ -33,21 +33,52 @@ def execute_gui_action(instruction: str, image_bytes: bytes) -> str:
         print("[Orchestrator] Keyboard action detected, bypassing ShowUI.")
         return "GUI Action executed. Result from vision model: {'action': 'ENTER', 'position': None}"
     
+    # Short-circuit: For "type X" instructions, compose CLICK + INPUT directly.
+    # ShowUI is unreliable at separating instructions from typed content.
+    import re
+    type_match = re.search(r"(?:type|input|enter|write|send)\s+['\"](.+?)['\"]", instruction, re.IGNORECASE)
+    if type_match:
+        text_to_type = type_match.group(1)
+        print(f"[Orchestrator] INPUT short-circuit: will type '{text_to_type}' — using ShowUI only for click position.")
+        # Still call ShowUI to find WHERE the input field is
+        try:
+            showui = modal.Cls.from_name("showui-service", "ShowUI")()
+            click_prompt = (
+                f"Click on the text input field or chat box where a message can be typed. "
+                f"IGNORE the black box at the top center. The input field is at the BOTTOM (y > 0.8). "
+                f"Respond with JSON: {{\"action\": \"CLICK\", \"position\": [x, y]}}"
+            )
+            click_result = showui.run_inference.remote(image_bytes=image_bytes, prompt=click_prompt)
+            # Extract position from click result
+            pos_match = re.search(r"\[(\d+\.?\d*),\s*(\d+\.?\d*)\]", click_result)
+            if pos_match:
+                x, y = float(pos_match.group(1)), float(pos_match.group(2))
+                return (
+                    f"GUI Action executed. Result from vision model: "
+                    f"{{'action': 'CLICK', 'position': [{x}, {y}]}},"
+                    f"{{'action': 'INPUT', 'value': '{text_to_type}', 'position': [{x}, {y}]}}"
+                )
+        except Exception as e:
+            print(f"[Orchestrator] ShowUI click-for-INPUT failed: {e}")
+        # Fallback: type at bottom-center
+        return (
+            f"GUI Action executed. Result from vision model: "
+            f"{{'action': 'CLICK', 'position': [0.49, 0.94]}},"
+            f"{{'action': 'INPUT', 'value': '{text_to_type}', 'position': [0.49, 0.94]}}"
+        )
+
     # Dynamically lookup the ShowUI app we already built
     try:
         showui = modal.Cls.from_name("showui-service", "ShowUI")()
-        # Create a specific prompt for GUI actions based on orchestrator translation
+        # Minimal prompt — only ask for the action, keep instructions separate
         gui_prompt = (
-            f"You are a precise GUI agent. Perform this instruction: '{instruction}'.\n\n"
-            f"CRITICAL SAFETY: A black box exists at the top center [x: 0.3 to 0.7, y: 0.0 to 0.6]. IGNORE IT - it is the assistant's UI. "
-            f"For chat/messaging apps, the input field is almost always at the BOTTOM (y > 0.8). "
-            f"Respond ONLY with valid JSON.\n"
-            f"Allowed 'action' values: ['CLICK', 'INPUT', 'ENTER'].\n"
-            f"Format requirements:\n"
-            f"1. For clicking: {{\"action\": \"CLICK\", \"position\": [x, y]}}\n"
-            f"2. For typing: {{\"action\": \"INPUT\", \"value\": \"text\", \"position\": [x, y]}}\n"
-            f"3. For enter: {{\"action\": \"ENTER\", \"position\": null}}\n"
-            f"Coordinates [x, y] must be floats [0.0-1.0]."
+            f"Based on this instruction: '{instruction}'\n"
+            f"IGNORE any black box at the top center of the screen.\n"
+            f"Chat input fields are at the BOTTOM (y > 0.8).\n"
+            f"Respond with JSON. Allowed actions: CLICK, INPUT, ENTER.\n"
+            f"CLICK: {{\"action\": \"CLICK\", \"position\": [x, y]}}\n"
+            f"INPUT: {{\"action\": \"INPUT\", \"value\": \"text\", \"position\": [x, y]}}\n"
+            f"ENTER: {{\"action\": \"ENTER\", \"position\": null}}"
         )
         
         result = showui.run_inference.remote(

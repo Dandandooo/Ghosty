@@ -28,17 +28,19 @@ struct NotchPanelView: View {
 
             if !model.isVoiceEnabled {
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(model.outputItems) { item in
-                            outputBubble(for: item)
+                    VStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(model.outputItems) { item in
+                                outputBubble(for: item)
+                            }
                         }
+                        .frame(width: 236, alignment: .leading)
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { _, h in
+                            messagesContentHeight = h
+                        }
+                        .padding(.vertical, outputFadeHeight)
                         Color.clear.frame(height: 1).id("scrollBottom")
                     }
-                    .frame(width: 236, alignment: .leading)
-                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { _, h in
-                        messagesContentHeight = h
-                    }
-                    .padding(.vertical, outputFadeHeight)
                 }
                 .scrollPosition(id: $scrollAnchorID, anchor: .bottom)
                 .scrollClipDisabled()
