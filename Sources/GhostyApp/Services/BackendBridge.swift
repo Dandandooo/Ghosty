@@ -19,7 +19,6 @@ final class BackendBridge: @unchecked Sendable {
         )
     }
 
-    @MainActor
     func runPythonTemplate(input: String) throws -> String {
         let scriptURL = try pythonTemplateScriptURL()
         let response = try runBundledPythonScript(scriptURL: scriptURL, input: input)
@@ -29,13 +28,24 @@ final class BackendBridge: @unchecked Sendable {
     private func runBundledPythonScript(scriptURL: URL, input: String) throws -> String {
         let process = Process()
         
-        // Try to use the virtual environment relative to the script if it exists
-        let venvURL = scriptURL.deletingLastPathComponent().appendingPathComponent(".venv/bin/python3")
-        
-        if FileManager.default.fileExists(atPath: venvURL.path) {
+        // Try to find a valid python3 executable in potential .venv locations
+        let venvCandidates: [URL] = [
+            // 1. Absolute path from compilation time (source-level uv .venv)
+            URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent() // Services/
+                .deletingLastPathComponent() // GhostyApp/
+                .appendingPathComponent("Resources/Backend/.venv/bin/python3"),
+            // 2. Relative to the bundled script (standard bundle structure)
+            scriptURL.deletingLastPathComponent().appendingPathComponent(".venv/bin/python3"),
+            // 3. In the user's Ghosty directory (persistent shared venv fallback)
+            URL(fileURLWithPath: NSString(string: "~/Ghosty/.venv/bin/python3").expandingTildeInPath)
+        ]
+
+        if let venvURL = venvCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
             process.executableURL = venvURL
             process.arguments = [scriptURL.path, input]
         } else {
+            // Fallback to system python3
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["python3", scriptURL.path, input]
         }
@@ -75,7 +85,7 @@ final class BackendBridge: @unchecked Sendable {
         return String(decoding: outputData, as: UTF8.self)
     }
 
-    func startMonitoringStateFile(path: String = "~/ghosty/state.json") {
+    func startMonitoringStateFile(path: String = "~/Ghosty/state.json") {
         let expanded = NSString(string: path).expandingTildeInPath
         stateFileMonitor = StateFileMonitor(filePath: expanded) { [weak self] data in
             guard let self else { return }

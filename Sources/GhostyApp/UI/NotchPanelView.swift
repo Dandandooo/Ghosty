@@ -67,6 +67,10 @@ struct NotchPanelView: View {
                             isPromptFocused = focused
 
                             guard !focused, !model.isSubmittingText, !model.isVoiceEnabled, model.isPeeked else { return }
+                            
+                            // Extra safety: don't retreat if the assistant is still in a working state
+                            guard model.assistantState != .working else { return }
+                            
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                                 guard !isPromptFocused, model.isPeeked else { return }
                                 model.retreatGhost()
@@ -189,6 +193,8 @@ struct NotchPanelView: View {
     }
 
     private func submitTypedPrompt() {
+        guard !model.isSubmittingText else { return }
+        
         let prompt = model.textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             model.retreatGhost()

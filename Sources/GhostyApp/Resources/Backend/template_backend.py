@@ -3,24 +3,61 @@ import sys
 import os
 import modal
 
-# Setup Modal ShowUI client
-def get_showui_client():
+# Setup Modal Orchestrator client
+def get_orchestrator_client():
     try:
-        # Look up the deployed class (Modal 1.3.4+ syntax)
-        return modal.Cls.from_name("showui-service", "ShowUI")()
+        # Look up the newly deployed Orchestrator class
+        return modal.Cls.from_name("ghosty-orchestrator", "OrchestratorAgent")()
     except Exception as e:
-        print(f"DEBUG: Failed to lookup Modal service: {e}", file=sys.stderr)
+        print(f"DEBUG: Failed to lookup Orchestrator service: {e}", file=sys.stderr)
         return None
 
 def get_screenshot():
     import tempfile
-    tmp_dir = tempfile.gettempdir()
-    screenshot_path = os.path.join(tmp_dir, "ghosty_screen.png")
-    # Using macOS screencapture utility
-    os.system(f"screencapture -x {screenshot_path}")
+    from datetime import datetime
     
-    with open(screenshot_path, "rb") as f:
-        return f.read()
+    # 1. Ensure screenshot directory exists
+    screenshot_dir = os.path.expanduser("~/Ghosty/screenshots")
+    if not os.path.exists(screenshot_dir):
+        os.makedirs(screenshot_dir, exist_ok=True)
+    
+    # 2. Generate timestamped filename
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    permanent_path = os.path.join(screenshot_dir, f"ghosty_{timestamp}.png")
+    
+    # 3. Capture screen using macOS screencapture utility
+    # -x: disable sound
+    os.system(f"screencapture -x {permanent_path}")
+    print(f"DEBUG: Screenshot saved to {permanent_path}", file=sys.stderr, flush=True)
+    
+    # 4. Mask the "Ghosty Zone" (top center) using Pillow
+    from PIL import Image, ImageDraw
+    try:
+        with Image.open(permanent_path) as img:
+            width, height = img.size
+            draw = ImageDraw.Draw(img)
+            
+            # Define Ghosty Zone: [0.3 to 0.7, 0.0 to 0.6]
+            # We use a black rectangle to "cut out" the Ghosty UI
+            left = int(0.3 * width)
+            top = 0
+            right = int(0.7 * width)
+            bottom = int(0.6 * height)
+            
+            draw.rectangle([left, top, right, bottom], fill="black")
+            
+            # Save the masked image back to a buffer or the file
+            img.save(permanent_path)
+            print(f"DEBUG: Masked Ghosty Zone in {permanent_path}", file=sys.stderr, flush=True)
+            
+            import io
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='PNG')
+            return img_byte_arr.getvalue()
+    except Exception as e:
+        print(f"DEBUG: Masking failed: {e}", file=sys.stderr)
+        with open(permanent_path, "rb") as f:
+            return f.read()
 
 def generate_response(text: str) -> str:
     normalized = (text or "").strip()
@@ -37,53 +74,22 @@ def generate_response(text: str) -> str:
     except Exception as e:
         return f"Error capturing screen: {str(e)}"
 
-    # 2. Call Modal Service
+    # 2. Call Modal Orchestrator
     try:
-        print("DEBUG: Connecting to Modal...", file=sys.stderr, flush=True)
-        showui = get_showui_client()
-        if not showui:
-            return "Error: Could not connect to Modal ShowUI service."
+        print("DEBUG: Connecting to Modal Orchestrator...", file=sys.stderr, flush=True)
+        orch = get_orchestrator_client()
+        if not orch:
+            return "Error: Could not connect to Modal Orchestrator service."
         
-        # --- Official Propts from ShowUI Docs ---
-        _NAV_SYSTEM = """You are an assistant trained to navigate the web screen. 
-Given a task instruction, a screen observation, and an action history sequence, 
-output the next action and wait for the next observation. 
-Here is the action space:
-1. `CLICK`: Click on an element, value is not applicable and the position [x,y] is required. 
-2. `INPUT`: Type a string into an element, value is a string to type and the position [x,y] is required. 
-3. `SELECT`: Select a value for an element, value is not applicable and the position [x,y] is required. 
-4. `HOVER`: Hover on an element, value is not applicable and the position [x,y] is required.
-5. `ANSWER`: Answer the question, value is the answer and the position is not applicable.
-6. `ENTER`: Enter operation, value and position are not applicable.
-7. `SCROLL`: Scroll the screen, value is the direction to scroll and the position is not applicable.
-8. `SELECT_TEXT`: Select some text content, value is not applicable and position [[x1,y1], [x2,y2]] is the start and end position of the select operation.
-9. `COPY`: Copy the text, value is the text to copy and the position is not applicable.
-"""
-
-        _NAV_FORMAT = """
-Format the action as a dictionary with the following keys:
-{'action': 'ACTION_TYPE', 'value': 'element', 'position': [x,y]}
-
-If value or position is not applicable, set it as `None`.
-Position might be [[x1,y1], [x2,y2]] if the action requires a start and end position.
-Position represents the relative coordinates on the screenshot and should be scaled to a range of 0-1.
-"""
-        sys_prompt = _NAV_SYSTEM + _NAV_FORMAT
-        
-        # Official prompt format: Task: {query}
-        full_prompt = f"Task: {normalized}"
-        
-        print(f"DEBUG: Calling Modal remote inference with prompt: {full_prompt}", file=sys.stderr, flush=True)
-        result = showui.run_inference.remote(
-            image_bytes=image_bytes, 
-            prompt=full_prompt, 
-            system_prompt=sys_prompt
+        print(f"DEBUG: Calling Orchestrator remote inference with prompt: {normalized}", file=sys.stderr, flush=True)
+        result = orch.invoke.remote(
+            user_prompt=normalized,
+            image_bytes=image_bytes
         )
-        print("DEBUG: Received result from Modal", file=sys.stderr, flush=True)
-        
+        print(f"DEBUG: Received result from Orchestrator: {result}", file=sys.stderr, flush=True)
         return result
     except Exception as e:
-        return f"Error calling ShowUI: {str(e)}"
+        return f"Error calling Orchestrator: {str(e)}"
 
 def main() -> int:
     text = " ".join(sys.argv[1:]).strip()

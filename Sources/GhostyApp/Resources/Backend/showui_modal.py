@@ -18,9 +18,12 @@ image = (
     )
 )
 
+# Create a persistent volume for the Hugging Face cache
+volume = modal.Volume.from_name("showui-model-cache", create_if_missing=True)
+
 app = modal.App("showui-service")
 
-@app.cls(gpu="any", image=image, timeout=600)
+@app.cls(gpu="L4", image=image, volumes={"/root/.cache/huggingface": volume}, timeout=600, min_containers=1)
 class ShowUI:
     @modal.enter()
     def load_model(self):
@@ -33,21 +36,12 @@ class ShowUI:
         import torch
 
         self.model_id = "showlab/ShowUI-2B"
-        print(f"Loading model {self.model_id} with 4-bit quantization...")
-        
-        # Official Recommended Quantization
-        nf4_config = BitsAndBytesConfig(
-           load_in_4bit=True,
-           bnb_4bit_quant_type="nf4",
-           bnb_4bit_use_double_quant=True,
-           bnb_4bit_compute_dtype=torch.bfloat16
-        )
+        print(f"Loading model {self.model_id} in native bfloat16 (no quantization for faster startup)...")
         
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             self.model_id,
             torch_dtype=torch.bfloat16,
-            device_map="auto",
-            quantization_config=nf4_config
+            device_map="auto"
         )
         
         # Official pixel constraints
@@ -86,19 +80,46 @@ class ShowUI:
         print(f"[DEBUG] Image loaded. Size: {img.size}")
 
         # 2. Prepare Messages
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
-            
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "image", "image": img, "min_pixels": self.min_pixels, "max_pixels": self.max_pixels},
-                {"type": "text", "text": prompt},
-            ],
-        })
+        # Integrate official ShowUI _NAV_SYSTEM and action_map
+        _NAV_SYSTEM = """You are an assistant trained to navigate the web screen. 
+Given a task instruction, a screen observation, and an action history sequence, 
+output the next action and wait for the next observation. 
+Here is the action space:
+1. `CLICK`: Click on an element, value is not applicable and the position [x,y] is required. 
+2. `INPUT`: Type a string into an element, value is a string to type and the position [x,y] is required. 
+3. `SELECT`: Select a value for an element, value is not applicable and the position [x,y] is required. 
+4. `HOVER`: Hover on an element, value is not applicable and the position [x,y] is required.
+5. `ANSWER`: Answer the question, value is the answer and the position is not applicable.
+6. `ENTER`: Enter operation, value and position are not applicable.
+7. `SCROLL`: Scroll the screen, value is the direction to scroll and the position is not applicable.
+8. `SELECT_TEXT`: Select some text content, value is not applicable and position [[x1,y1], [x2,y2]] is the start and end position of the select operation.
+9. `COPY`: Copy the text, value is the text to copy and the position is not applicable.
+"""
+
+        _NAV_FORMAT = """
+Format the action as a dictionary with the following keys:
+{'action': 'ACTION_TYPE', 'value': 'element', 'position': [x,y]}
+
+If value or position is not applicable, set it as `None`.
+Position might be [[x1,y1], [x2,y2]] if the action requires a start and end position.
+Position represents the relative coordinates on the screenshot and should be scaled to a range of 0-1.
+"""
+        
+        full_system_prompt = _NAV_SYSTEM + _NAV_FORMAT
+        
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": full_system_prompt},
+                    {"type": "text", "text": f'Task: {prompt}'},
+                    {"type": "image", "image": img, "min_pixels": self.min_pixels, "max_pixels": self.max_pixels},
+                ]
+            }
+        ]
 
         # 3. Process and Generate
+
         print("[DEBUG] Applying chat template...")
         text = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
@@ -116,7 +137,7 @@ class ShowUI:
         print("[DEBUG] Generating tokens...")
         generated_ids = self.model.generate(
             **inputs, 
-            max_new_tokens=128,
+            max_new_tokens=512,
             do_sample=False,
             num_beams=1,
         )

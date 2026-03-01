@@ -61,6 +61,10 @@ final class NotchWindowController {
         updatePosition(peeked: isPeeked, animated: animated)
     }
 
+    func setIgnoresMouseEvents(_ ignores: Bool) {
+        panel.ignoresMouseEvents = ignores
+    }
+
     private func updatePosition(peeked: Bool, animated: Bool) {
         guard let screen = NSScreen.main else { return }
 

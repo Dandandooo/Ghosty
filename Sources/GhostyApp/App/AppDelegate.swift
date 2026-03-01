@@ -41,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
             .sink { [weak self] _ in
                 guard let self, self.model.isPeeked else { return }
+                
+                // Don't retreat if we are currently working on a command!
+                // This prevents the ghost from disappearing when a GUI action causes the app to lose focus.
+                if self.model.assistantState == .working {
+                    print("AppDelegate: App resigned active but Assistant is WORKING, skipping retreat.")
+                    return
+                }
+                
                 self.model.retreatGhost()
             }
             .store(in: &subscriptions)
@@ -95,10 +103,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Stop the wake-word detector while the ghost is visible (its AVAudioEngine
         // conflicts with the active SpeechListener), and restart it once the ghost
         // retreats to sleep so it can wake the ghost again next time.
-        model.$isPeeked
+        model.$ignoresMouseEvents
             .removeDuplicates()
-            .sink { [weak self] _ in self?.syncWakeWordDetector() }
+            .sink { [weak self] ignores in
+                self?.notchWindowController?.setIgnoresMouseEvents(ignores)
+            }
             .store(in: &subscriptions)
+
+        model.$isWindowVisible
+            .removeDuplicates()
+            .sink { [weak self] isVisible in
+                self?.notchWindowController?.setVisible(isVisible)
+            }
+            .store(in: &subscriptions)
+
+        model.isVoiceEnabled = voiceEnabled
     }
 
     private func configureHotkey() {
