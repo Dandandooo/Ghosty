@@ -40,6 +40,7 @@ final class GhostAssistantModel: ObservableObject {
 
     private let backendBridge = BackendBridge()
     private var retreatTask: Task<Void, Never>?
+    private var pendingNewlines = 0
 
     func togglePeekAndListenMode() {
         if isPeeked {
@@ -109,31 +110,52 @@ final class GhostAssistantModel: ObservableObject {
     private func processStreamingChunk(_ chunk: String) {
         for char in chunk {
             if char == "\n" {
-                // Finalise current bubble if non-empty, then open a fresh one
-                if case .streamingText(let text) = outputItems.last?.content {
-                    if text.trimmingCharacters(in: .whitespaces).isEmpty {
-                        // Reuse the empty bubble for the next line
-                    } else {
-                        outputItems[outputItems.count - 1] =
-                            AssistantOutputItem(content: .text(text))
-                        outputItems.append(AssistantOutputItem(content: .streamingText("")))
-                    }
-                }
+                pendingNewlines += 1
             } else {
-                if case .streamingText(let text) = outputItems.last?.content {
-                    outputItems[outputItems.count - 1] =
-                        AssistantOutputItem(content: .streamingText(text + String(char)))
+                if pendingNewlines >= 2 {
+                    // Double+ newline → new bubble
+                    pendingNewlines = 0
+                    if case .streamingText(let text) = outputItems.last?.content {
+                        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            // Reuse empty bubble
+                            outputItems[outputItems.count - 1] =
+                                AssistantOutputItem(content: .streamingText(String(char)))
+                        } else {
+                            outputItems[outputItems.count - 1] =
+                                AssistantOutputItem(content: .text(text))
+                            outputItems.append(AssistantOutputItem(content: .streamingText(String(char))))
+                        }
+                    } else {
+                        outputItems.append(AssistantOutputItem(content: .streamingText(String(char))))
+                    }
+                } else if pendingNewlines == 1 {
+                    // Single newline → line break within the same bubble
+                    pendingNewlines = 0
+                    if case .streamingText(let text) = outputItems.last?.content {
+                        outputItems[outputItems.count - 1] =
+                            AssistantOutputItem(content: .streamingText(text + "\n" + String(char)))
+                    } else {
+                        outputItems.append(AssistantOutputItem(content: .streamingText(String(char))))
+                    }
                 } else {
-                    outputItems.append(AssistantOutputItem(content: .streamingText(String(char))))
+                    // Normal character, no pending newlines
+                    if case .streamingText(let text) = outputItems.last?.content {
+                        outputItems[outputItems.count - 1] =
+                            AssistantOutputItem(content: .streamingText(text + String(char)))
+                    } else {
+                        outputItems.append(AssistantOutputItem(content: .streamingText(String(char))))
+                    }
                 }
             }
         }
     }
 
     private func finishStreaming(result: Result<Void, Error>) {
+        pendingNewlines = 0
+
         // Finalise the dangling streaming bubble
         if case .streamingText(let text) = outputItems.last?.content {
-            if text.trimmingCharacters(in: .whitespaces).isEmpty {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 outputItems.removeLast()
             } else {
                 outputItems[outputItems.count - 1] =
