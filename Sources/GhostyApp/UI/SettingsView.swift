@@ -67,7 +67,8 @@ private struct PersonalizationTab: View {
 // MARK: – Ghosty Theme
 
 private struct ThemeTab: View {
-    @State private var selectedTheme = "og"
+    @ObservedObject private var settings = SettingsManager.shared
+    private let themes = GhostThemeRegistry.shared.themes
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -75,12 +76,16 @@ private struct ThemeTab: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 16) {
-                ThemeCard(
-                    label: "The OG",
-                    isSelected: selectedTheme == "og"
-                ) {
-                    selectedTheme = "og"
+            let columns = [GridItem(.adaptive(minimum: 90, maximum: 120), spacing: 16)]
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(themes, id: \.id) { theme in
+                    ThemeCard(
+                        label: theme.displayName,
+                        theme: theme,
+                        isSelected: settings.selectedThemeID == theme.id
+                    ) {
+                        settings.selectedThemeID = theme.id
+                    }
                 }
             }
 
@@ -92,13 +97,14 @@ private struct ThemeTab: View {
 
 private struct ThemeCard: View {
     let label: String
+    var theme: GhostTheme = OGGhostTheme.theme
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                GhostCharacterView(state: .idle, size: 48)
+                GhostCharacterView(state: .idle, size: 48, theme: theme)
                     .allowsHitTesting(false)
                     .frame(width: 72, height: 72)
 
@@ -107,6 +113,8 @@ private struct ThemeCard: View {
                     .foregroundStyle(.primary)
             }
             .padding(10)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)

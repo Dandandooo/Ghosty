@@ -10,15 +10,16 @@ struct GhostCharacterView: View {
     var isRetreating: Bool = false
     var isVoiceMode: Bool = false
     var micLevel: Float = 0
-    private let bodyHeightMultiplier: CGFloat = 1.28
-    private let baseScale: CGFloat = 1.06
+    var theme: GhostTheme = OGGhostTheme.theme
+
+    private var bodyAppearance: GhostBodyAppearance { theme.bodyAppearance }
+    private var anim: GhostAnimationConfig { theme.animation }
 
     @State private var pulse = false
     @State private var flapPhase: CGFloat = 0
     @State private var loadingPhase: CGFloat = 0
     @State private var wavePhase: CGFloat = 0
-    @State private var leftPupilOffset: CGSize = .zero
-    @State private var rightPupilOffset: CGSize = .zero
+    @State private var pupilOffsets: [CGSize] = []
     @State private var ghostFrameInScreen: CGRect = .zero
     @State private var lastMousePos: CGPoint = .zero
     @State private var followingTextCursor = false
@@ -27,7 +28,6 @@ struct GhostCharacterView: View {
     @State private var retreatOffset: CGFloat = 0
     @State private var retreatOpacity: Double = 1.0
     @State private var lastFrameDate: Date? = nil
-    private let flapCyclesPerSecond: CGFloat = 0.22
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -35,200 +35,121 @@ struct GhostCharacterView: View {
         }
     }
 
+    // MARK: - Main Layout
+
     @ViewBuilder
     private func innerBody(frameDate: Date) -> some View {
-        let ghostShape = GhostBody(phase: flapPhase)
-        let eye = eyeMetrics
-        let snappedLeftPupilOffset = pixelSnapped(leftPupilOffset)
-        let snappedRightPupilOffset = pixelSnapped(rightPupilOffset)
+        let ghostShape = ThemeBodyShape(provider: theme.bodyShape, phase: flapPhase)
+        let bodyH = size * bodyAppearance.heightMultiplier
 
         ZStack {
+            // Body fill
             ghostShape
                 .fill(
                     LinearGradient(
-                        colors: [
-                            Color.white,
-                            Color(white: 0.992),
-                            Color(white: 0.965)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        colors: bodyAppearance.fillColors,
+                        startPoint: bodyAppearance.fillStart,
+                        endPoint: bodyAppearance.fillEnd
                     )
                 )
-                .frame(width: size, height: size * bodyHeightMultiplier)
+                .frame(width: size, height: bodyH)
+                // Darkening overlay
                 .overlay {
                     ghostShape
                         .fill(
                             LinearGradient(
-                                colors: [
-                                    .black.opacity(0.0),
-                                    .black.opacity(0.05),
-                                    .black.opacity(0.12)
-                                ],
+                                colors: bodyAppearance.darkenColors,
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
-                        .frame(width: size, height: size * bodyHeightMultiplier)
+                        .frame(width: size, height: bodyH)
                 }
+                // Radial highlight
                 .overlay {
                     ghostShape
                         .fill(
                             RadialGradient(
-                                colors: [
-                                    .white.opacity(0.56),
-                                    .white.opacity(0.0)
-                                ],
-                                center: .topLeading,
-                                startRadius: 0,
-                                endRadius: size * 0.55
+                                colors: bodyAppearance.highlightColors,
+                                center: bodyAppearance.highlightCenter,
+                                startRadius: size * bodyAppearance.highlightStartRadius,
+                                endRadius: size * bodyAppearance.highlightEndRadius
                             )
                         )
-                        .frame(width: size, height: size * bodyHeightMultiplier)
-                        .offset(x: -size * 0.06, y: -size * 0.10)
+                        .frame(width: size, height: bodyH)
+                        .offset(
+                            x: size * bodyAppearance.highlightOffset.x,
+                            y: size * bodyAppearance.highlightOffset.y
+                        )
                 }
+                // Fabric texture (optional)
                 .overlay {
-                    FabricTextureView(size: size)
-                        .mask(
-                            ghostShape
-                                .frame(width: size, height: size * bodyHeightMultiplier)
-                        )
-                        .opacity(0.24)
+                    if bodyAppearance.showFabricTexture {
+                        FabricTextureView(size: size)
+                            .mask(
+                                ghostShape.frame(width: size, height: bodyH)
+                            )
+                            .opacity(bodyAppearance.fabricTextureOpacity)
+                    }
                 }
 
+            // Outline
             ghostShape
-                .stroke(.black.opacity(0.11), lineWidth: max(1, size * 0.03))
-                .frame(width: size, height: size * bodyHeightMultiplier)
+                .stroke(bodyAppearance.outlineColor, lineWidth: max(1, size * bodyAppearance.outlineWidthRatio))
+                .frame(width: size, height: bodyH)
 
-            HStack(spacing: eye.spacing) {
-                ZStack {
-                    Ellipse()
-                        .fill(.white)
-                        .frame(width: eye.whiteWidth, height: eye.whiteHeight)
-                        .overlay {
-                            Ellipse().stroke(.black.opacity(0.22), lineWidth: eye.strokeWidth)
-                        }
+            // Below-eyes accessories (clipped to ghost body shape)
+            accessoriesLayer(for: .belowEyes, bodyH: bodyH)
+                .clipShape(ghostShape)
+                .frame(width: size, height: bodyH)
 
-                    if isVoiceMode {
-                        Ellipse()
-                            .fill(.black)
-                            .frame(width: eye.whiteWidth, height: eye.whiteHeight)
-                        EyeWaveformView(
-                            phase: wavePhase,
-                            eyeWidth: eye.whiteWidth,
-                            eyeHeight: eye.whiteHeight,
-                            phaseShift: 0.0,
-                            micLevel: micLevel
-                        )
-                    } else {
-                        Circle()
-                            .fill(.black)
-                            .frame(width: eye.pupilDiameter, height: eye.pupilDiameter)
-                            .offset(snappedLeftPupilOffset)
+            // Eyes
+            eyesLayer
 
-                        if isWorking {
-                            EyeLoadingDots(
-                                pupilOffset: snappedLeftPupilOffset,
-                                pupilDiameter: eye.pupilDiameter,
-                                dotDiameter: eye.highlightDiameter,
-                                phase: loadingPhase,
-                                phaseOffset: 0
-                            )
-                        } else {
-                            Circle()
-                                .fill(.white.opacity(0.95))
-                                .frame(width: eye.highlightDiameter, height: eye.highlightDiameter)
-                                .offset(
-                                    x: snappedLeftPupilOffset.width - eye.highlightInset,
-                                    y: snappedLeftPupilOffset.height - eye.highlightInset
-                                )
-                        }
-                    }
-                }
-
-                ZStack {
-                    Ellipse()
-                        .fill(.white)
-                        .frame(width: eye.whiteWidth, height: eye.whiteHeight)
-                        .overlay {
-                            Ellipse().stroke(.black.opacity(0.22), lineWidth: eye.strokeWidth)
-                        }
-
-                    if isVoiceMode {
-                        Ellipse()
-                            .fill(.black)
-                            .frame(width: eye.whiteWidth, height: eye.whiteHeight)
-                        EyeWaveformView(
-                            phase: wavePhase,
-                            eyeWidth: eye.whiteWidth,
-                            eyeHeight: eye.whiteHeight,
-                            phaseShift: 0.37,
-                            micLevel: micLevel
-                        )
-                    } else {
-                        Circle()
-                            .fill(.black)
-                            .frame(width: eye.pupilDiameter, height: eye.pupilDiameter)
-                            .offset(snappedRightPupilOffset)
-
-                        if isWorking {
-                            EyeLoadingDots(
-                                pupilOffset: snappedRightPupilOffset,
-                                pupilDiameter: eye.pupilDiameter,
-                                dotDiameter: eye.highlightDiameter,
-                                phase: loadingPhase,
-                                phaseOffset: 0.5
-                            )
-                        } else {
-                            Circle()
-                                .fill(.white.opacity(0.95))
-                                .frame(width: eye.highlightDiameter, height: eye.highlightDiameter)
-                                .offset(
-                                    x: snappedRightPupilOffset.width - eye.highlightInset,
-                                    y: snappedRightPupilOffset.height - eye.highlightInset
-                                )
-                        }
-                    }
+            // Mouth (optional)
+            if let mouth = theme.mouth {
+                if !(mouth.hiddenInVoiceMode && isVoiceMode) {
+                    RoundedRectangle(cornerRadius: size * mouth.cornerRadiusRatio)
+                        .fill(mouth.color.opacity(mouth.opacity))
+                        .frame(width: size * mouth.widthRatio, height: size * mouth.heightRatio)
+                        .offset(x: size * mouth.offsetX, y: size * mouth.offsetY)
                 }
             }
-            .offset(y: eye.verticalOffset)
 
-            if !isVoiceMode {
-                RoundedRectangle(cornerRadius: size * 0.08)
-                    .fill(.black.opacity(0.82))
-                    .frame(width: size * 0.14, height: size * 0.06)
-                    .offset(x: size * 0.055, y: size * 0.08)
-            }
+            // Above-eyes accessories
+            accessoriesLayer(for: .aboveEyes, bodyH: bodyH)
         }
-        .frame(width: size, height: size * bodyHeightMultiplier)
+        .frame(width: size, height: bodyH)
         .contentShape(Rectangle())
         .background(
             GhostScreenFrameReader { frame in
                 ghostFrameInScreen = frame
             }
         )
-        .scaleEffect(pulses ? (pulse ? 1.08 : 0.95) : 1.0)
-        .scaleEffect(baseScale)
-        .opacity(pulses ? (pulse ? 1.0 : 0.68) : 1.0)
-        .animation(pulses ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: pulse)
-        .animation(.easeOut(duration: 0.09), value: leftPupilOffset)
-        .animation(.easeOut(duration: 0.09), value: rightPupilOffset)
+        .scaleEffect(pulses ? (pulse ? anim.pulseScaleHigh : anim.pulseScaleLow) : 1.0)
+        .scaleEffect(anim.baseScale)
+        .opacity(pulses ? (pulse ? anim.pulseOpacityHigh : anim.pulseOpacityLow) : 1.0)
+        .animation(
+            pulses
+                ? .easeInOut(duration: anim.pulseDuration).repeatForever(autoreverses: true)
+                : .default,
+            value: pulse
+        )
+        .animation(.easeOut(duration: 0.09), value: pupilOffsets)
         .offset(y: retreatOffset)
         .opacity(retreatOpacity)
         .onChange(of: isRetreating) { _, retreating in
             if retreating {
-                // Snap pupils to look upward
-                withAnimation(.easeOut(duration: 0.12)) {
-                    leftPupilOffset = CGSize(width: 0, height: -(size * 0.032))
-                    rightPupilOffset = CGSize(width: 0, height: -(size * 0.032))
+                withAnimation(.easeOut(duration: anim.retreatPupilSnapDuration)) {
+                    for i in pupilOffsets.indices {
+                        pupilOffsets[i] = CGSize(width: 0, height: -(size * anim.maxPupilRadiusRatio))
+                    }
                 }
-                // Fly upward and fade out after a brief beat
-                withAnimation(.easeIn(duration: 0.42).delay(0.08)) {
-                    retreatOffset = -(size * 4.5)
+                withAnimation(.easeIn(duration: anim.retreatDuration).delay(anim.retreatDelay)) {
+                    retreatOffset = -(size * anim.retreatDistanceMultiplier)
                     retreatOpacity = 0.0
                 }
             } else {
-                // Reset instantly (view is hidden by now)
                 retreatOffset = 0
                 retreatOpacity = 1.0
             }
@@ -241,23 +162,17 @@ struct GhostCharacterView: View {
                 dt = 1.0 / 60.0
             }
             lastFrameDate = newDate
-            updateGazeFromCursor()
-            flapPhase += flapCyclesPerSecond * dt
+            updateGaze()
+            flapPhase += anim.flapCyclesPerSecond * dt
             if isVoiceMode {
-                wavePhase += 0.54 * dt
-                if wavePhase > 10_000 {
-                    wavePhase = wavePhase.truncatingRemainder(dividingBy: 1)
-                }
+                wavePhase += anim.waveSpeedPerSecond * dt
+                if wavePhase > 10_000 { wavePhase = wavePhase.truncatingRemainder(dividingBy: 1) }
             }
             if isWorking {
-                loadingPhase += 0.84 * dt
-                if loadingPhase > 10_000 {
-                    loadingPhase = loadingPhase.truncatingRemainder(dividingBy: 1)
-                }
+                loadingPhase += anim.loadingSpeedPerSecond * dt
+                if loadingPhase > 10_000 { loadingPhase = loadingPhase.truncatingRemainder(dividingBy: 1) }
             }
-            if flapPhase > 10_000 {
-                flapPhase = flapPhase.truncatingRemainder(dividingBy: 1)
-            }
+            if flapPhase > 10_000 { flapPhase = flapPhase.truncatingRemainder(dividingBy: 1) }
         }
         .onChange(of: pulses) { _, nowPulsing in
             pulse = nowPulsing
@@ -265,50 +180,166 @@ struct GhostCharacterView: View {
         .onChange(of: state) { _, newState in
             if newState == .working {
                 withAnimation(.easeInOut(duration: 0.5)) {
-                    leftPupilOffset = .zero
-                    rightPupilOffset = .zero
+                    for i in pupilOffsets.indices { pupilOffsets[i] = .zero }
                 }
             }
         }
         .onChange(of: gazeTarget) { _, _ in
-            // keep followingTextCursor pointing at the latest position
-            if gazeTarget != nil {
-                followingTextCursor = true
-            }
+            if gazeTarget != nil { followingTextCursor = true }
         }
         .onChange(of: gazeActivityToken) { _, _ in
-            // fires on every keystroke, even when the screen point doesn't change
             followingTextCursor = true
             lastActivityTime = Date()
             isIdle = false
         }
         .onAppear {
-            flapPhase = 0
-            loadingPhase = 0
-            wavePhase = 0
+            ensurePupilOffsets()
+            flapPhase = 0; loadingPhase = 0; wavePhase = 0
             pulse = pulses
         }
     }
 
-    private var pulses: Bool {
-        state == .listening && !isVoiceMode
+    // MARK: - Accessories Layer
+
+    @ViewBuilder
+    private func accessoriesLayer(for layer: AccessoryLayer, bodyH: CGFloat) -> some View {
+        // Shape-based accessories
+        let items = theme.accessories.filter { $0.layer == layer }
+        ForEach(0..<items.count, id: \.self) { i in
+            let acc = items[i]
+            let shape = AccessoryShape(provider: acc.shapeProvider)
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: acc.fillColors,
+                        startPoint: acc.fillStart,
+                        endPoint: acc.fillEnd
+                    )
+                )
+                .overlay {
+                    if let strokeColor = acc.strokeColor, acc.strokeWidthRatio > 0 {
+                        shape
+                            .stroke(strokeColor, lineWidth: max(0.5, size * acc.strokeWidthRatio))
+                    }
+                }
+                .frame(width: size, height: bodyH)
+                .opacity(acc.opacity)
+        }
     }
 
-    private var isWorking: Bool {
-        state == .working
+    // MARK: - Eyes Layer
+
+    @ViewBuilder
+    private var eyesLayer: some View {
+        let offsets = pupilOffsets.isEmpty
+            ? Array(repeating: CGSize.zero, count: theme.eyes.count)
+            : pupilOffsets
+
+        ZStack {
+            ForEach(Array(theme.eyes.enumerated()), id: \.offset) { idx, eyeCfg in
+                let snapped = pixelSnapped(idx < offsets.count ? offsets[idx] : .zero)
+                let scleraW = pixelSnapped(size * eyeCfg.scleraWidthRatio)
+                let scleraH = pixelSnapped(size * eyeCfg.scleraHeightRatio)
+                let strokeW = pixelSnapped(max(0.8, size * eyeCfg.scleraStrokeWidthRatio))
+                let pupilD  = pixelSnapped(size * eyeCfg.pupilDiameterRatio)
+                let hlDiam  = pixelSnapped(size * eyeCfg.highlightDiameterRatio)
+                let hlInset = pixelSnapped(size * eyeCfg.highlightInsetRatio)
+
+                ZStack {
+                    // Stalk (drawn behind eye if present)
+                    if let stalkLen = eyeCfg.stalkLengthRatio {
+                        let stalkW = size * eyeCfg.stalkWidthRatio
+                        let stalkH = size * stalkLen
+                        Capsule()
+                            .fill(eyeCfg.stalkColor ?? bodyAppearance.fillColors.last ?? .gray)
+                            .frame(width: stalkW, height: stalkH)
+                            .offset(y: stalkH / 2 - scleraH * 0.15)
+                    }
+
+                    // Sclera
+                    Ellipse()
+                        .fill(eyeCfg.scleraColor)
+                        .frame(width: scleraW, height: scleraH)
+                        .overlay {
+                            Ellipse().stroke(
+                                eyeCfg.scleraStrokeColor.opacity(eyeCfg.scleraStrokeOpacity),
+                                lineWidth: strokeW
+                            )
+                        }
+
+                    if isVoiceMode {
+                        Ellipse()
+                            .fill(eyeCfg.pupilColor)
+                            .frame(width: scleraW, height: scleraH)
+                        EyeWaveformView(
+                            phase: wavePhase,
+                            eyeWidth: scleraW,
+                            eyeHeight: scleraH,
+                            phaseShift: eyeCfg.waveformPhaseShift,
+                            micLevel: micLevel
+                        )
+                    } else {
+                        // Pupil
+                        Circle()
+                            .fill(eyeCfg.pupilColor)
+                            .frame(width: pupilD, height: pupilD)
+                            .offset(snapped)
+
+                        if isWorking {
+                            EyeLoadingDots(
+                                pupilOffset: snapped,
+                                pupilDiameter: pupilD,
+                                dotDiameter: hlDiam,
+                                dotColor: eyeCfg.highlightColor,
+                                phase: loadingPhase,
+                                phaseOffset: eyeCfg.loadingPhaseOffset
+                            )
+                        } else {
+                            // Highlight dot
+                            Circle()
+                                .fill(eyeCfg.highlightColor.opacity(eyeCfg.highlightOpacity))
+                                .frame(width: hlDiam, height: hlDiam)
+                                .offset(
+                                    x: snapped.width - hlInset,
+                                    y: snapped.height - hlInset
+                                )
+                        }
+                    }
+                }
+                .offset(
+                    x: pixelSnapped(size * eyeCfg.relativeX),
+                    y: pixelSnapped(size * eyeCfg.relativeY)
+                )
+            }
+        }
     }
 
-    private func updateGazeFromCursor() {
-        guard !isRetreating else { return }
-        guard !isWorking else { return }
-        guard !ghostFrameInScreen.isEmpty else {
-            leftPupilOffset = .zero
-            rightPupilOffset = .zero
+    // MARK: - Computed Helpers
+
+    private var pulses: Bool { state == .listening && !isVoiceMode }
+    private var isWorking: Bool { state == .working }
+
+    // MARK: - Gaze Tracking
+
+    private func ensurePupilOffsets() {
+        if pupilOffsets.count != theme.eyes.count {
+            pupilOffsets = Array(repeating: .zero, count: theme.eyes.count)
+        }
+    }
+
+    private func updateGaze() {
+        guard !isRetreating, !isWorking, !ghostFrameInScreen.isEmpty else {
+            if !ghostFrameInScreen.isEmpty { return }
+            ensurePupilOffsets()
+            for i in pupilOffsets.indices { pupilOffsets[i] = .zero }
             return
         }
 
+        ensurePupilOffsets()
+
         let mouse = NSEvent.mouseLocation
-        let mouseMoved = lastMousePos != .zero && hypot(mouse.x - lastMousePos.x, mouse.y - lastMousePos.y) > 1.5
+        let mouseMoved = lastMousePos != .zero
+            && hypot(mouse.x - lastMousePos.x, mouse.y - lastMousePos.y) > 1.5
         if mouseMoved {
             followingTextCursor = false
             lastActivityTime = Date()
@@ -317,12 +348,11 @@ struct GhostCharacterView: View {
         lastMousePos = mouse
 
         let secondsSinceActivity = Date().timeIntervalSince(lastActivityTime)
-        if secondsSinceActivity >= 3.0 {
+        if secondsSinceActivity >= anim.idleTimeoutSeconds {
             if !isIdle {
                 isIdle = true
                 withAnimation(.easeInOut(duration: 0.5)) {
-                    leftPupilOffset = .zero
-                    rightPupilOffset = .zero
+                    for i in pupilOffsets.indices { pupilOffsets[i] = .zero }
                 }
             }
             return
@@ -335,19 +365,16 @@ struct GhostCharacterView: View {
             target = mouse
         }
 
-        let leftEyeCenter = eyeCenterInScreen(isLeftEye: true)
-        let rightEyeCenter = eyeCenterInScreen(isLeftEye: false)
-
-        leftPupilOffset = pupilOffset(toward: target, from: leftEyeCenter)
-        rightPupilOffset = pupilOffset(toward: target, from: rightEyeCenter)
+        for (idx, eyeCfg) in theme.eyes.enumerated() {
+            let center = eyeCenterInScreen(for: eyeCfg)
+            pupilOffsets[idx] = pupilOffset(toward: target, from: center)
+        }
     }
 
-    private func eyeCenterInScreen(isLeftEye: Bool) -> CGPoint {
-        let eyeSpacing = size * 0.22
-        let eyeCenterYOffset = -size * 0.11
-        let eyeCenterXInView = size / 2 + (isLeftEye ? -eyeSpacing / 2 : eyeSpacing / 2)
-        let eyeCenterYInView = (size * bodyHeightMultiplier) / 2 + eyeCenterYOffset
-
+    private func eyeCenterInScreen(for eyeCfg: GhostEyeConfig) -> CGPoint {
+        let bodyH = size * bodyAppearance.heightMultiplier
+        let eyeCenterXInView = size / 2 + size * eyeCfg.relativeX
+        let eyeCenterYInView = bodyH / 2 + size * eyeCfg.relativeY
         return CGPoint(
             x: ghostFrameInScreen.minX + eyeCenterXInView,
             y: ghostFrameInScreen.maxY - eyeCenterYInView
@@ -357,43 +384,24 @@ struct GhostCharacterView: View {
     private func pupilOffset(toward target: CGPoint, from eyeCenter: CGPoint) -> CGSize {
         let dx = target.x - eyeCenter.x
         let dy = target.y - eyeCenter.y
-
-        let rawX = dx * 0.018
-        let rawY = -dy * 0.018
-        let maxRadius = size * 0.032
-
+        let rawX = dx * anim.gazeSensitivity
+        let rawY = -dy * anim.gazeSensitivity
+        let maxRadius = size * anim.maxPupilRadiusRatio
         let distance = sqrt(rawX * rawX + rawY * rawY)
         let scale = distance > maxRadius ? maxRadius / distance : 1
-
-        return CGSize(
-            width: rawX * scale,
-            height: rawY * scale
-        )
+        return CGSize(width: rawX * scale, height: rawY * scale)
     }
 
-    private var eyeMetrics: EyeMetrics {
-        EyeMetrics(
-            spacing: pixelSnapped(size * 0.22),
-            verticalOffset: pixelSnapped(-size * 0.11),
-            whiteWidth: pixelSnapped(size * 0.198),
-            whiteHeight: pixelSnapped(size * 0.184),
-            strokeWidth: pixelSnapped(max(0.8, size * 0.018)),
-            pupilDiameter: pixelSnapped(size * 0.141),
-            highlightDiameter: pixelSnapped(size * 0.033),
-            highlightInset: pixelSnapped(size * 0.024)
-        )
-    }
+    // MARK: - Pixel Snapping
 
     private var displayScale: CGFloat {
         guard !ghostFrameInScreen.isEmpty else {
             return max(NSScreen.main?.backingScaleFactor ?? 2.0, 1.0)
         }
-
         let center = CGPoint(x: ghostFrameInScreen.midX, y: ghostFrameInScreen.midY)
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) {
             return max(screen.backingScaleFactor, 1.0)
         }
-
         return max(NSScreen.main?.backingScaleFactor ?? 2.0, 1.0)
     }
 
@@ -402,17 +410,17 @@ struct GhostCharacterView: View {
     }
 
     private func pixelSnapped(_ offset: CGSize) -> CGSize {
-        CGSize(
-            width: pixelSnapped(offset.width),
-            height: pixelSnapped(offset.height)
-        )
+        CGSize(width: pixelSnapped(offset.width), height: pixelSnapped(offset.height))
     }
 }
+
+// MARK: - Eye Loading Dots
 
 private struct EyeLoadingDots: View {
     let pupilOffset: CGSize
     let pupilDiameter: CGFloat
     let dotDiameter: CGFloat
+    var dotColor: Color = .white
     let phase: CGFloat
     let phaseOffset: CGFloat
 
@@ -423,12 +431,13 @@ private struct EyeLoadingDots: View {
 
         ZStack {
             ForEach(0..<dotCount, id: \.self) { index in
-                let progress = (phase + phaseOffset + CGFloat(index) / CGFloat(dotCount)).truncatingRemainder(dividingBy: 1)
+                let progress = (phase + phaseOffset + CGFloat(index) / CGFloat(dotCount))
+                    .truncatingRemainder(dividingBy: 1)
                 let angle = progress * .pi * 2
                 let opacity = 0.18 + (Double(index) / Double(dotCount - 1)) * 0.82
 
                 Circle()
-                    .fill(.white.opacity(opacity))
+                    .fill(dotColor.opacity(opacity))
                     .frame(width: dotDiameter * 0.72, height: dotDiameter * 0.72)
                     .offset(
                         x: pupilOffset.width + cos(angle) * orbitRadius,
@@ -439,28 +448,16 @@ private struct EyeLoadingDots: View {
     }
 }
 
-private struct EyeMetrics {
-    let spacing: CGFloat
-    let verticalOffset: CGFloat
-    let whiteWidth: CGFloat
-    let whiteHeight: CGFloat
-    let strokeWidth: CGFloat
-    let pupilDiameter: CGFloat
-    let highlightDiameter: CGFloat
-    let highlightInset: CGFloat
-}
+// MARK: - Eye Waveform
 
 private struct EyeWaveformView: View {
     let phase: CGFloat
     let eyeWidth: CGFloat
     let eyeHeight: CGFloat
-    /// Offset (0–1) so the two eyes animate out of sync.
     let phaseShift: CGFloat
-    /// Smoothed RMS mic level 0–1; scales bar amplitude.
     let micLevel: Float
 
     private let barCount = 4
-    // Irrational frequency ratios → non-repeating envelope per bar
     private let barFreqs:   [CGFloat] = [1.0, 2.17, 1.63, 2.84]
     private let barOffsets: [CGFloat] = [0.0,  0.43, 0.21, 0.68]
     private let barHarm2:   [CGFloat] = [0.38, 0.26, 0.48, 0.22]
@@ -479,20 +476,21 @@ private struct EyeWaveformView: View {
 
     private func barHeight(for index: Int) -> CGFloat {
         let f  = barFreqs[index]
-        let φ  = (barOffsets[index] + phaseShift) * .pi * 2
+        let phi  = (barOffsets[index] + phaseShift) * .pi * 2
         let h2 = Double(barHarm2[index])
-        let θ  = Double(phase * f * .pi * 2)
+        let theta  = Double(phase * f * .pi * 2)
 
-        let wave = sin(θ + Double(φ)) + h2 * sin(θ * 2.13 + Double(φ) * 0.7)
-        let normalized = CGFloat(wave / (1.0 + h2)) // ≈ –1…1
+        let wave = sin(theta + Double(phi)) + h2 * sin(theta * 2.13 + Double(phi) * 0.7)
+        let normalized = CGFloat(wave / (1.0 + h2))
 
-        // At micLevel=0 bars stay at minimum; at full level the full range is used.
-        let amplitude = CGFloat(max(micLevel, 0.08)) // 0.08 floor keeps bars subtly alive at silence
+        let amplitude = CGFloat(max(micLevel, 0.08))
         let minH = eyeHeight * 0.18
         let maxH = eyeHeight * (0.18 + 0.64 * amplitude)
         return minH + (maxH - minH) * (normalized * 0.5 + 0.5)
     }
 }
+
+// MARK: - Fabric Texture
 
 private struct FabricTextureView: View {
     let size: CGFloat
@@ -543,6 +541,8 @@ private struct FabricTextureView: View {
     }
 }
 
+// MARK: - Screen Frame Reader
+
 private struct GhostScreenFrameReader: NSViewRepresentable {
     var onChange: (CGRect) -> Void
 
@@ -579,63 +579,5 @@ private struct GhostScreenFrameReader: NSViewRepresentable {
                 self?.onFrameChange?(frameInScreen)
             }
         }
-    }
-}
-
-private struct GhostBody: Shape {
-    var phase: CGFloat = 0
-
-    var animatableData: CGFloat {
-        get { phase }
-        set { phase = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let width = rect.width
-        let height = rect.height
-        let leftSideX = rect.minX + width * 0.20
-        let rightSideX = rect.maxX - width * 0.20
-        let topY = rect.minY + height * 0.10
-        let shoulderY = rect.minY + height * 0.43
-        let baseY = rect.minY + height * 0.84
-        let span = rightSideX - leftSideX
-        let uniformFoldCount: CGFloat = 3
-        let sampleCount = 48
-        let waveAmplitude = height * 0.026
-
-        func bottomPoint(t: CGFloat) -> CGPoint {
-            let x = rightSideX - span * t
-            let angle = (t * uniformFoldCount * 2 * .pi) + (phase * 2 * .pi)
-            let y = baseY + CGFloat(sin(Double(angle))) * waveAmplitude
-            return CGPoint(x: x, y: y)
-        }
-
-        path.move(to: CGPoint(x: leftSideX, y: shoulderY))
-        path.addQuadCurve(
-            to: CGPoint(x: rightSideX, y: shoulderY),
-            control: CGPoint(x: rect.midX, y: topY)
-        )
-
-        path.addCurve(
-            to: CGPoint(x: rightSideX, y: baseY),
-            control1: CGPoint(x: rightSideX + width * 0.01, y: shoulderY + height * 0.12),
-            control2: CGPoint(x: rightSideX + width * 0.012, y: baseY - height * 0.12)
-        )
-
-        path.addLine(to: bottomPoint(t: 0))
-        for i in 1 ... sampleCount {
-            let t = CGFloat(i) / CGFloat(sampleCount)
-            path.addLine(to: bottomPoint(t: t))
-        }
-
-        path.addCurve(
-            to: CGPoint(x: leftSideX, y: shoulderY),
-            control1: CGPoint(x: leftSideX - width * 0.01, y: baseY - height * 0.12),
-            control2: CGPoint(x: leftSideX - width * 0.01, y: shoulderY + height * 0.12)
-        )
-
-        path.closeSubpath()
-        return path
     }
 }

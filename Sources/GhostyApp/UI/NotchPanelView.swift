@@ -23,7 +23,7 @@ struct NotchPanelView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken, isRetreating: model.isRetreating, isVoiceMode: model.isVoiceEnabled, micLevel: model.micLevel)
+            GhostCharacterView(state: model.assistantState, size: 88, gazeTarget: model.textCursorScreenPoint, gazeActivityToken: model.textActivityToken, isRetreating: model.isRetreating, isVoiceMode: model.isVoiceEnabled, micLevel: model.micLevel, theme: SettingsManager.shared.selectedTheme)
                 .offset(y: 6)
 
             if !model.isVoiceEnabled {
@@ -257,7 +257,7 @@ struct NotchPanelView: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(Color.white.opacity(0.25))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)

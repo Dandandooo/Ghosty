@@ -133,6 +133,7 @@ final class OnboardingViewModel: ObservableObject {
         let sm = SettingsManager.shared
         sm.userName = userName
         sm.personalizationPrompt = personalizationPrompt
+        sm.selectedThemeID = selectedTheme
         sm.hasCompletedOnboarding = true
         onComplete?()
     }
@@ -203,8 +204,10 @@ struct OnboardingView: View {
                 }
             }
 
-            // Peeking ghost in top-right corner
-            PeekingGhostView(arrived: vm.ghostArrived)
+            // Peeking ghost in top-right corner (hidden on theme selection page)
+            if vm.phase != .themeSelection {
+                PeekingGhostView(arrived: vm.ghostArrived)
+            }
         }
         .onAppear {
             vm.onComplete = onComplete
@@ -571,12 +574,16 @@ private struct ThemeSelectionPhaseView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 16) {
-                OnboardingThemeCard(
-                    label: "The OG",
-                    isSelected: vm.selectedTheme == "og"
-                ) {
-                    vm.selectedTheme = "og"
+            let columns = [GridItem(.adaptive(minimum: 90, maximum: 120), spacing: 16)]
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(GhostThemeRegistry.shared.themes, id: \.id) { theme in
+                    OnboardingThemeCard(
+                        label: theme.displayName,
+                        theme: theme,
+                        isSelected: vm.selectedTheme == theme.id
+                    ) {
+                        vm.selectedTheme = theme.id
+                    }
                 }
             }
             .padding(.top, 8)
@@ -589,13 +596,14 @@ private struct ThemeSelectionPhaseView: View {
 
 private struct OnboardingThemeCard: View {
     let label: String
+    var theme: GhostTheme = OGGhostTheme.theme
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                GhostCharacterView(state: .idle, size: 48)
+                GhostCharacterView(state: .idle, size: 48, theme: theme)
                     .allowsHitTesting(false)
                     .frame(width: 72, height: 72)
 
@@ -604,6 +612,8 @@ private struct OnboardingThemeCard: View {
                     .foregroundStyle(.primary)
             }
             .padding(10)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .background {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(isSelected

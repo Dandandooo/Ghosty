@@ -44,16 +44,28 @@ final class SettingsManager: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
+    // MARK: – Theme
+
+    @Published var selectedThemeID: String {
+        didSet { defaults.set(selectedThemeID, forKey: Keys.selectedThemeID) }
+    }
+
+    var selectedTheme: GhostTheme {
+        GhostThemeRegistry.shared.theme(forID: selectedThemeID)
+    }
+
     private enum Keys {
         static let hasCompletedOnboarding = "ghosty_hasCompletedOnboarding"
         static let userName = "ghosty_userName"
         static let personalizationPrompt = "ghosty_personalizationPrompt"
+        static let selectedThemeID = "ghosty_selectedThemeID"
     }
 
     init() {
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.hasCompletedOnboarding)
         self.userName = defaults.string(forKey: Keys.userName) ?? ""
         self.personalizationPrompt = defaults.string(forKey: Keys.personalizationPrompt) ?? ""
+        self.selectedThemeID = defaults.string(forKey: Keys.selectedThemeID) ?? "og"
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let ghostyDir = appSupport.appendingPathComponent("Ghosty", isDirectory: true)
