@@ -1,5 +1,7 @@
 import AppKit
+import AVFoundation
 import Combine
+import Speech
 import SwiftUI
 
 @MainActor
@@ -18,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var escapeMonitor: Any?
     private var commaMonitor: Any?
     private var onboardingWindowController: OnboardingWindowController?
+    private var isRequestingVoicePermissions = false
     private var subscriptions = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -199,24 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 if state == .listening, self.voiceEnabled {
                     if self.speechListener == nil {
-                        let listener = SpeechListener(onCommand: { [weak self] phrase in
-                            Task { @MainActor in
-                                guard let self else { return }
-                                switch phrase {
-                                case "ghost", "ghost start", "hey ghost", "hey ghosty":
-                                    NSApp.activate(ignoringOtherApps: true)
-                                    self.model.togglePeekAndListenMode()
-                                case "ghost stop", "bye ghost", "bye ghosty":
-                                    self.model.retreatGhost()
-                                case "ghost status":
-                                    self.model.showMessage("It's looking good, brev")
-                                default:
-                                    self.model.submitIntent(phrase)
-                                }
-                            }
-                        })
-                        listener.wakeCommands = ["ghost", "ghost start", "hey ghost", "hey ghosty"]
-                        self.speechListener = listener
+                        self.speechListener = self.makeSpeechListener()
                     }
                     self.speechListener?.startListening()
                 } else {
@@ -236,18 +222,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.onRetreatGhost = { [weak self] in
             Task { @MainActor in
                 self?.model.retreatGhost()
-            }
-        }
-
-        menuBarController?.onVoiceEnabledChanged = { [weak self] enabled in
-            Task { @MainActor in
-                self?.setVoiceEnabled(enabled)
-            }
-        }
-
-        menuBarController?.onHeyGhostyEnabledChanged = { [weak self] enabled in
-            Task { @MainActor in
-                self?.setHeyGhostyEnabled(enabled)
             }
         }
 
@@ -294,11 +268,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setVoiceEnabled(_ enabled: Bool) {
+        // Voice mode is currently hidden from users; force text mode.
+        applyVoiceEnabled(false)
+    }
+
+    private func applyVoiceEnabled(_ enabled: Bool) {
         voiceEnabled = enabled
         model.isVoiceEnabled = enabled
+        menuBarController?.setVoiceEnabled(enabled)
 
         if !enabled {
-            // Stop the wake word detector — it only runs in voice mode
+            // Stop the wake word detector — it only runs in voice mode.
             wakeWordDetector?.stop()
             wakeWordDetector = nil
             speechListener?.stopListening()
@@ -316,11 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if model.assistantState == .listening {
             if speechListener == nil {
-                speechListener = SpeechListener(onCommand: { [weak self] phrase in
-                    Task { @MainActor in
-                        self?.model.submitIntent(phrase)
-                    }
-                })
+                speechListener = makeSpeechListener()
             }
             speechListener?.startListening()
         }
@@ -329,5 +305,117 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setHeyGhostyEnabled(_ enabled: Bool) {
         heyGhostyEnabled = enabled
         syncWakeWordDetector()
+    }
+
+    private func requestVoicePermissionsAndEnable() {
+        guard !isRequestingVoicePermissions else { return }
+        guard isRunningInsideAppBundle else {
+            print(
+                """
+                Ghosty: speech recognition permission cannot be requested from this launch context \
+                (\(Bundle.main.bundleURL.path)). Run Ghosty as a macOS .app bundle to enable voice.
+                """
+            )
+            applyVoiceEnabled(false)
+            return
+        }
+        guard hasRequiredVoiceUsageDescriptions else {
+            print(
+                """
+                Ghosty: missing NSMicrophoneUsageDescription and/or \
+                NSSpeechRecognitionUsageDescription in Bundle.main info dictionary. \
+                Refusing to request permissions.
+                """
+            )
+            applyVoiceEnabled(false)
+            return
+        }
+        isRequestingVoicePermissions = true
+
+        requestMicrophonePermission { [weak self] micGranted in
+            guard let self else { return }
+            guard micGranted else {
+                Task { @MainActor in
+                    self.isRequestingVoicePermissions = false
+                    self.applyVoiceEnabled(false)
+                }
+                return
+            }
+
+            Task { @MainActor in
+                self.requestSpeechPermission { [weak self] speechGranted in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.isRequestingVoicePermissions = false
+                        self.applyVoiceEnabled(speechGranted)
+                    }
+                }
+            }
+        }
+    }
+
+    private var hasRequiredVoiceUsageDescriptions: Bool {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let microphone = (info["NSMicrophoneUsageDescription"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let speech = (info["NSSpeechRecognitionUsageDescription"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !(microphone?.isEmpty ?? true) && !(speech?.isEmpty ?? true)
+    }
+
+    private var isRunningInsideAppBundle: Bool {
+        containingAppBundleURL(for: Bundle.main.bundleURL) != nil
+    }
+
+    private func containingAppBundleURL(for url: URL) -> URL? {
+        var currentURL = url.standardizedFileURL
+        while currentURL.path != "/" {
+            if currentURL.pathExtension == "app" {
+                return currentURL
+            }
+            currentURL.deleteLastPathComponent()
+        }
+        return nil
+    }
+
+    private func requestMicrophonePermission(completion: @escaping @Sendable (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio, completionHandler: completion)
+        default:
+            completion(false)
+        }
+    }
+
+    private func requestSpeechPermission(completion: @escaping @Sendable (Bool) -> Void) {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            SFSpeechRecognizer.requestAuthorization { status in
+                completion(status == .authorized)
+            }
+        default:
+            completion(false)
+        }
+    }
+
+    private func makeSpeechListener() -> SpeechListener {
+        SpeechListener(onCommand: { [weak self] phrase in
+            Task { @MainActor in
+                guard let self else { return }
+                let normalized = phrase.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                switch normalized {
+                case "ghost stop", "bye ghost", "bye ghosty":
+                    self.model.retreatGhost()
+                case "ghost status":
+                    self.model.showMessage("It's looking good, brev")
+                default:
+                    self.model.submitIntent(phrase)
+                }
+            }
+        })
     }
 }

@@ -21,6 +21,16 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [
                 .process("Resources")
+            ],
+            linkerSettings: [
+                // Embed privacy usage descriptions into the executable so TCC
+                // can validate microphone/speech permission requests.
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/GhostyApp/Info.plist"
+                ])
             ]
         )
     ]
